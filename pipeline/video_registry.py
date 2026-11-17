@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from pipeline.core_resilience import atomic_write_json, safe_load_json
+from pipeline.core_resilience import MacOSLegacyRuntime, atomic_write_json, safe_load_json
 from pipeline.schemas_m3 import AuditedScriptItem
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -335,16 +335,39 @@ class VideoRegistryManager:
         return out
 
     def get_rendered_unposted_videos(self) -> List[VideoRegistryEntry]:
-        """Return all videos in `RENDERED` state (ready for publishing module, not yet `PUBLISHED`)."""
+        """
+        Return all videos in `RENDERED` state whose MP4 file exists on disk.
+        If the user manually deleted an MP4 file from `output/videos/` to discard a video,
+        automatically purge that entry (and its scripts/payloads) so it never triggers missing-file errors
+        and never gets re-rendered!
+        """
         raw = self._load_raw()
         items = raw.get("items") or {}
         out: List[VideoRegistryEntry] = []
-        for _, val in items.items():
+        manually_deleted_ids: List[str] = []
+
+        for sid, val in list(items.items()):
             if isinstance(val, dict) and val.get("status") == "RENDERED":
+                mp4_p = MacOSLegacyRuntime.resolve_portable_video_path(val.get("video_path"), str(sid))
+                if not mp4_p.exists():
+                    manually_deleted_ids.append(str(sid))
+                    items.pop(sid, None)
+                    continue
                 try:
                     out.append(VideoRegistryEntry.model_validate(val))
                 except Exception:
                     pass
+
+        if manually_deleted_ids:
+            self._save_raw(raw)
+            if self.registry_path == DEFAULT_VIDEO_REGISTRY_PATH:
+                for sid in manually_deleted_ids:
+                    self.purge_script_from_m2_m3_files(sid)
+                    print(
+                        f"[VIDEO REGISTRY] 🧹 Phát hiện file {sid}.mp4 đã bị xóa thủ công -> "
+                        f"Tự động gỡ hoàn toàn {sid} khỏi sổ trạng thái và M2/M3 (không render lại)!",
+                        flush=True,
+                    )
         return out
 
     def get_entry(self, script_id: str) -> Optional[VideoRegistryEntry]:

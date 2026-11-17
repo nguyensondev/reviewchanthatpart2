@@ -271,6 +271,11 @@ class PipelineHealthInspector:
             )
 
         # M4
+        try:
+            from pipeline.core_resilience import StorageGarbageCollector
+            StorageGarbageCollector().sweep_all()
+        except Exception:
+            pass
         ok, d, err = _read_json_strict(DATA_DIR / "m4_production_output.json")
         if not ok:
             lines.append(f"⚪ M4 (Dựng video 9:16): {err}")
@@ -309,6 +314,12 @@ class PipelineHealthInspector:
         return "\n".join(lines)
 
     def _collect_recent_errors(self) -> List[str]:
+        # Run StorageGarbageCollector first so any manually deleted MP4 is automatically reconciled & purged
+        try:
+            from pipeline.core_resilience import StorageGarbageCollector
+            StorageGarbageCollector().sweep_all()
+        except Exception:
+            pass
         findings: List[str] = []
 
         # 1. Check M5 publish report errors
@@ -389,6 +400,11 @@ class PipelineHealthInspector:
         return "\n".join(lines)
 
     def build_status_quota_report(self) -> str:
+        try:
+            from pipeline.core_resilience import StorageGarbageCollector
+            StorageGarbageCollector().sweep_all()
+        except Exception:
+            pass
         qm = DailyQuotaManager()
         s_used, s_rem, _ = qm.get_script_quota_status()
         v_used, v_rem, _ = qm.get_video_quota_status()

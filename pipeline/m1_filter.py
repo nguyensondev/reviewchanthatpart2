@@ -507,9 +507,11 @@ Hãy xuất JSON theo schema `LLMComparativeJudgeBatchResponse` gồm đầy đ�
         for cat in pool.functional_categories:
             ranked, foils = self._filter_and_score_category(cat)
             if not ranked:
-                raise RuntimeError(
-                    f"Category {cat.category_id} has 0 surviving candidates after M1.1 hard gate!"
+                print(
+                    f"     -> [M1 SKIP] Category {cat.category_id} has 0 surviving candidates after M1.1 hard gate — skipping gracefully.",
+                    flush=True,
                 )
+                continue
 
             # Cross-category winner deduplication: ensure two different categories do not crown the exact same model
             def _sku_dedup_key(item: EvaluatedCandidateSKU) -> str:
@@ -541,6 +543,9 @@ Hãy xuất JSON theo schema `LLMComparativeJudgeBatchResponse` gồm đầy đ�
                 flush=True,
             )
             category_tuples.append((cat, ranked, foils))
+
+        if not category_tuples:
+            raise RuntimeError("All categories in M0 candidate pool had 0 surviving candidates after M1.1 hard gate!")
 
         print(
             "[M1] 3/3 Synthesizing Head-to-Head Multi-Brand Comparative Verdicts via Gemini (1 call)...",

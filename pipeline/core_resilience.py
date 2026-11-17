@@ -452,6 +452,13 @@ class StorageGarbageCollector:
                         st_val = val.get("status")
                         if st_val == "RENDERED":
                             rendered_ids_to_strip_scripts.add(sid)
+                            mp4_p = MacOSLegacyRuntime.resolve_portable_video_path(val.get("video_path"), sid)
+                            if not mp4_p.exists():
+                                # User manually deleted the MP4 -> purge entry & payloads completely and never re-render
+                                published_ids_to_purge.add(sid)
+                                items.pop(sid, None)
+                                vreg_changed = True
+                                continue
                             if val.get("script_payload") is not None:
                                 val["script_payload"] = None
                                 vreg_changed = True
