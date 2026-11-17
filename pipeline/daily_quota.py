@@ -193,19 +193,38 @@ class DailyQuotaManager:
         now: Optional[dt.datetime] = None,
     ) -> Tuple[bool, str, int]:
         """
-        Check both the 3-video daily cap and the 2-hour post-render cooldown.
-        Returns `(allowed, status_code, seconds_to_wait)`:
-          - status_code in ("READY", "COOLDOWN_RESTING_2H", "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW")
+        Check:
+          1. Weekly Random Rest Day (1 day/week Monday..Sunday when `not ignore_cooldown`)
+          2. Daily Randomized Human Active Hours (`06:00 – 09:30 AM` start when `not ignore_cooldown`)
+          3. 3-video daily cap
+          4. 2-hour post-render cooldown
+        Returns `(allowed, status_code, seconds_to_wait)`.
         """
+        now_dt = now or dt.datetime.now().astimezone()
+        if not ignore_cooldown:
+            is_rest, _, rest_name, wait_rest = HumanBehaviorGuard.get_weekly_rest_day_info(
+                now=now_dt,
+                state_path=self.state_path,
+            )
+            if is_rest:
+                return False, f"WEEKLY_REST_DAY_OFF ({rest_name})", wait_rest
+
+            in_hours, wait_hours = HumanBehaviorGuard.is_within_human_active_hours(
+                now=now_dt,
+                state_path=self.state_path,
+            )
+            if not in_hours:
+                return False, "OUTSIDE_HUMAN_ACTIVE_HOURS", wait_hours
+
         used, _, ids = self.get_video_quota_status()
         is_same_rerender = bool(allow_rerender_same_id and script_id and script_id in ids)
 
         if not is_same_rerender and used >= MAX_VIDEOS_PER_DAY:
-            sleep_info = self.get_sleep_until_tomorrow_info()
+            sleep_info = self.get_sleep_until_tomorrow_info(now=now_dt)
             return False, "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW", int(sleep_info["seconds_until_reset"])
 
         if not ignore_cooldown:
-            cd = self.get_cooldown_status(now=now)
+            cd = self.get_cooldown_status(now=now_dt)
             if cd["is_resting"]:
                 return False, "COOLDOWN_RESTING_2H", int(cd["seconds_until_next_render"])
 
@@ -266,14 +285,14 @@ class DailyQuotaManager:
         self._save_state(state)
         return event
 
-    def get_sleep_until_tomorrow_info(self) -> Dict[str, Any]:
-        now = dt.datetime.now().astimezone()
-        tomorrow_date = (now + dt.timedelta(days=1)).date()
-        next_reset = dt.datetime.combine(
-            tomorrow_date, dt.time(hour=0, minute=5, second=0), tzinfo=now.tzinfo
+    def get_sleep_until_tomorrow_info(self, now: Optional[dt.datetime] = None) -> Dict[str, Any]:
+        now_dt = now or dt.datetime.now().astimezone()
+        tomorrow_start, _ = HumanBehaviorGuard.get_daily_active_window(
+            now=now_dt + dt.timedelta(days=1),
+            state_path=self.state_path,
         )
-        seconds_left = max(60, int((next_reset - now).total_seconds()))
+        seconds_left = max(60, int((tomorrow_start - now_dt).total_seconds()))
         return {
-            "next_reset_at": next_reset.isoformat(timespec="seconds"),
+            "next_reset_at": tomorrow_start.isoformat(timespec="seconds"),
             "seconds_until_reset": seconds_left,
         }

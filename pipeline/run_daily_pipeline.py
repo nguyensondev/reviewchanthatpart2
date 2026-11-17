@@ -186,9 +186,17 @@ def print_pipeline_status() -> None:
     )
 
     in_active_hrs, wait_hrs = HumanBehaviorGuard.is_within_human_active_hours()
+    win_start_dt, win_end_dt = HumanBehaviorGuard.get_daily_active_window()
+    is_rest_day, _, rest_day_name, wait_rest_sec = HumanBehaviorGuard.get_weekly_rest_day_info()
     print("\n--- [4] GÓI ĐĂNG BÀI, CHỐNG BOT SHOPEE & NHỊP NGƯỜI THẬT (BƯỚC A + M5) ---", flush=True)
     print(
-        f"• Khung giờ người thật (08:15-22:15): {'ĐANG MỞ' if in_active_hrs else f'NGHỈ ĐÊM (còn {wait_hrs}s)'}",
+        f"• Ngày nghỉ ngẫu nhiên tuần này (M4 & M5): {rest_day_name} "
+        f"({'🏖️ HÔM NAY TẠM NGHỈ' if is_rest_day else '🟢 Hôm nay làm việc bình thường'})",
+        flush=True,
+    )
+    print(
+        f"• Khung giờ người thật hôm nay ({win_start_dt.strftime('%H:%M')}–{win_end_dt.strftime('%H:%M')}, bắt đầu random 06:00-09:30): "
+        f"{'ĐANG MỞ' if in_active_hrs else f'NGHỈ ĐÊM (còn {wait_hrs}s)'}",
         flush=True,
     )
     print(
@@ -373,10 +381,23 @@ def main() -> int:
             return 0
 
         # --mode auto
+        is_rest_day, _, rest_day_name, wait_rest_sec = HumanBehaviorGuard.get_weekly_rest_day_info()
+        if is_rest_day and not args.ignore_2h_cooldown:
+            print(
+                f"[AUTO] 🏖️ Hôm nay là ngày nghỉ ngẫu nhiên trong tuần ({rest_day_name})! "
+                f"Module M4 (Render) và M5 (Upload) tạm nghỉ trọn ngày giống người thật (mở lại sau {wait_rest_sec}s).",
+                flush=True,
+            )
+            StorageGarbageCollector().sweep_all()
+            print_pipeline_status()
+            return 0
+
         in_hrs, wait_hrs = HumanBehaviorGuard.is_within_human_active_hours()
+        win_start_dt, win_end_dt = HumanBehaviorGuard.get_daily_active_window()
         if not in_hrs and not args.ignore_2h_cooldown:
             print(
-                f"[AUTO] Đang ngoài khung giờ hoạt động của người thật (còn {wait_hrs}s đến sáng). Tạm nghỉ!",
+                f"[AUTO] Đang ngoài khung giờ hoạt động hôm nay ({win_start_dt.strftime('%H:%M')}–{win_end_dt.strftime('%H:%M')}, "
+                f"còn {wait_hrs}s đến giờ mở). Tạm nghỉ!",
                 flush=True,
             )
             StorageGarbageCollector().sweep_all()

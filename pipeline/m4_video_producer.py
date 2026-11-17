@@ -2053,20 +2053,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         used_today, _, existing_ids = qm.get_video_quota_status()
         skipped_ids: List[str] = []
 
-        # Check 2-hour cooldown before selecting scripts when `ignore_cooldown=False`
+        # Check weekly rest day, active hours, and 2-hour cooldown before selecting scripts when `ignore_cooldown=False`
         can_now, cd_status, wait_secs = qm.can_render_video_now(
             script_id=target_script_id,
             allow_rerender_same_id=allow_rerender_same_id,
             ignore_cooldown=ignore_cooldown,
         )
-        if not can_now and cd_status == "COOLDOWN_RESTING_2H":
+        if not can_now and (
+            cd_status == "COOLDOWN_RESTING_2H"
+            or cd_status == "OUTSIDE_HUMAN_ACTIVE_HOURS"
+            or cd_status.startswith("WEEKLY_REST_DAY_OFF")
+        ):
             cd_info = qm.get_cooldown_status()
             sleep_info = qm.get_sleep_until_tomorrow_info()
             now_iso = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
             m4_run_id = f"m4_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}_{m3_data.sub_niche_id}"
+            mapped_status: Literal[
+                "WITHIN_DAILY_QUOTA",
+                "COOLDOWN_RESTING_2H",
+                "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW",
+                "WEEKLY_REST_DAY_OFF",
+                "OUTSIDE_HUMAN_ACTIVE_HOURS",
+            ] = (
+                "WEEKLY_REST_DAY_OFF"
+                if cd_status.startswith("WEEKLY_REST_DAY_OFF")
+                else ("OUTSIDE_HUMAN_ACTIVE_HOURS" if cd_status == "OUTSIDE_HUMAN_ACTIVE_HOURS" else "COOLDOWN_RESTING_2H")
+            )
             print(
-                f"[M4 COOLDOWN] Đang trong thời gian nghỉ 2 tiếng sau khi render video trước! "
-                f"Còn {wait_secs}s nữa mới được render tiếp (lúc {cd_info['next_render_allowed_at']}).",
+                f"[M4 HUMAN GUARD] Tạm nghỉ tự nhiên ({cd_status}): "
+                f"Còn {wait_secs}s nữa mới render tiếp.",
                 flush=True,
             )
             return M4ProductionOutput(
@@ -2077,9 +2092,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 daily_videos_rendered_today=used_today,
                 remaining_video_quota_today=max(0, MAX_VIDEOS_PER_DAY - used_today),
                 min_render_cooldown_seconds=MIN_RENDER_COOLDOWN_SECONDS,
-                next_render_allowed_at=cd_info["next_render_allowed_at"],
+                next_render_allowed_at=cd_info["next_render_allowed_at"] or sleep_info["next_reset_at"],
                 seconds_until_next_render=wait_secs,
-                quota_status="COOLDOWN_RESTING_2H",
+                quota_status=mapped_status,
                 next_quota_reset_at=sleep_info["next_reset_at"],
                 seconds_until_quota_reset=sleep_info["seconds_until_reset"],
                 skipped_due_to_quota_script_ids=[s.script_id for s in eligible],

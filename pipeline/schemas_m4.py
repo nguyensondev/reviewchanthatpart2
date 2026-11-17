@@ -87,6 +87,8 @@ class M4ProductionOutput(BaseModel):
         "WITHIN_DAILY_QUOTA",
         "COOLDOWN_RESTING_2H",
         "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW",
+        "WEEKLY_REST_DAY_OFF",
+        "OUTSIDE_HUMAN_ACTIVE_HOURS",
     ]
     next_quota_reset_at: str
     seconds_until_quota_reset: int

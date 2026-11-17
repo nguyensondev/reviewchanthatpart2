@@ -396,6 +396,8 @@ class PipelineHealthInspector:
             allow_rerender_same_id=False, ignore_cooldown=False
         )
         in_hrs, wait_hrs = HumanBehaviorGuard.is_within_human_active_hours()
+        win_start_dt, win_end_dt = HumanBehaviorGuard.get_daily_active_window()
+        is_rest_day, _, rest_day_name, wait_rest_sec = HumanBehaviorGuard.get_weekly_rest_day_info()
 
         vreg = safe_load_json(DATA_DIR / "video_registry.json", lambda: {})
         entries = (vreg.get("items") or vreg.get("entries") or vreg.get("videos") or {}) if isinstance(vreg, dict) else {}
@@ -416,7 +418,8 @@ class PipelineHealthInspector:
         lines = [
             f"📊 QUOTA & HÀNG ĐỢI ({qm.today_key()})",
             "",
-            f"• Khung giờ hoạt động (08:15–22:15): {'🟢 Đang mở' if in_hrs else f'🌙 Đang ngủ đêm (còn {wait_hrs // 60} phút)'}",
+            f"• Ngày nghỉ tuần này (M4 & M5): {rest_day_name} ({'🏖️ Hôm nay nghỉ trọn ngày' if is_rest_day else '🟢 Hôm nay hoạt động'})",
+            f"• Giờ bắt đầu hôm nay (random 06:00–09:30): {win_start_dt.strftime('%H:%M')} – {win_end_dt.strftime('%H:%M')} ({'🟢 Đang mở' if in_hrs else f'🌙 Ngoài giờ (còn {wait_hrs // 60} phút)'})",
             f"• Quota Kịch bản (M3): {s_used}/{MAX_FINAL_SCRIPTS_PER_DAY} (còn {s_rem})",
             f"• Quota Render (M4): {v_used}/{MAX_VIDEOS_PER_DAY} (còn {v_rem})",
             f"• Quota Đăng bài (M5, random 1–2/ngày): {m5_used}/{m5_lim} (còn {m5_rem})",

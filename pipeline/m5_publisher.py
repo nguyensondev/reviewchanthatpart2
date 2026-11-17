@@ -177,18 +177,24 @@ class M5PublisherEngine:
     ) -> Tuple[bool, str, int]:
         """
         Check:
-          1. Hard Daily Random Publish Quota (`1` or `2` videos/day max)
-          2. Human Active Hours (`08:15 – 22:15`)
-          3. Natural jittered inter-post cooldown (`2h12m .. 3h55m`)
+          1. Weekly Random Rest Day (`1` day/week Monday..Sunday when `not force_now`)
+          2. Hard Daily Random Publish Quota (`1` or `2` videos/day max)
+          3. Daily Randomized Human Active Hours (`06:00 – 09:30 AM` start to `22:00 – 22:30 PM`)
+          4. Natural jittered inter-post cooldown (`2h12m .. 3h55m`)
         """
         now_dt = now or dt.datetime.now().astimezone()
+        if not force_now:
+            is_rest, _, rest_name, wait_rest = HumanBehaviorGuard.get_weekly_rest_day_info(now=now_dt)
+            if is_rest:
+                return False, f"WEEKLY_REST_DAY_OFF ({rest_name})", wait_rest
+
         used_today, limit_today, rem_today, pub_ids_today = self.get_daily_publish_quota_status(now=now_dt)
 
         # Allow finishing the second platform for a video already counted in today's quota
         is_resuming_today_video = bool(script_id and script_id in pub_ids_today)
         if not force_now and not is_resuming_today_video and rem_today <= 0:
-            tomorrow = (now_dt + dt.timedelta(days=1)).replace(hour=8, minute=15, second=0, microsecond=0)
-            wait_tomorrow = max(60, int((tomorrow - now_dt).total_seconds()))
+            tomorrow_start, _ = HumanBehaviorGuard.get_daily_active_window(now=now_dt + dt.timedelta(days=1))
+            wait_tomorrow = max(60, int((tomorrow_start - now_dt).total_seconds()))
             return False, f"DAILY_M5_QUOTA_REACHED_{used_today}_OF_{limit_today}", wait_tomorrow
 
         if force_now:

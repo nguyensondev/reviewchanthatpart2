@@ -47,9 +47,22 @@ DEFAULT_LOCK_PATH = DATA_DIR / ".pipeline_runtime.lock"
 MAX_VIDEO_CACHE_BYTES = 450 * 1024 * 1024
 MAX_QUOTA_HISTORY_DAYS = 30
 
-# Active human publishing hours (local time)
-HUMAN_ACTIVE_START_HOUR_MIN = (8, 15)   # 08:15 AM
-HUMAN_ACTIVE_END_HOUR_MIN = (22, 15)    # 10:15 PM
+# Active human publishing hours (local time):
+# Daily start time is RANDOMIZED each day between 06:00 AM and 09:30 AM (210-minute window)
+HUMAN_ACTIVE_START_MIN_HOUR_MIN = (6, 0)    # 06:00 AM earliest daily start
+HUMAN_ACTIVE_START_MAX_HOUR_MIN = (9, 30)   # 09:30 AM latest daily start
+HUMAN_ACTIVE_START_HOUR_MIN = (6, 0)        # Backwards-compatible alias
+HUMAN_ACTIVE_END_HOUR_MIN = (22, 15)        # 10:15 PM (with daily offset)
+
+WEEKDAY_NAMES_VI: List[str] = [
+    "Thứ 2",
+    "Thứ 3",
+    "Thứ 4",
+    "Thứ 5",
+    "Thứ 6",
+    "Thứ 7",
+    "Chủ nhật",
+]
 
 # Natural human rest between videos (>= 2h minimum guaranteed: 2h12m to 3h55m)
 HUMAN_COOLDOWN_MIN_SECONDS = 7920       # 2 hours 12 minutes
@@ -510,31 +523,86 @@ class StorageGarbageCollector:
 # ==============================================================================
 
 class HumanBehaviorGuard:
-    """Generates non-robotic timings, active-hour gates, and varied comment phrasings."""
+    """Generates non-robotic timings, active-hour gates, weekly rest days, and varied comment phrasings."""
 
     @staticmethod
-    def is_within_human_active_hours(now: Optional[dt.datetime] = None) -> Tuple[bool, int]:
+    def get_daily_active_window(
+        now: Optional[dt.datetime] = None,
+        state_path: Optional[Path] = None,
+    ) -> Tuple[dt.datetime, dt.datetime]:
         """
-        Return `(is_active_now, seconds_until_active_window)`.
-        Active window: `08:15` to `22:15` local time (with deterministic daily minute offset +-12m).
+        Return `(start_dt, end_dt)` for the calendar day of `now`.
+        - Daily start time is RANDOMIZED each day between `06:00:00` and `09:30:00` AM (`0 .. 12,600` seconds)
+          and persisted in `data/daily_quota_state.json` under `daily_active_windows[YYYY-MM-DD]` so it never
+          has a fixed starting clock time across days while staying consistent within the same day.
+        - Daily end time varies naturally between `22:00` and `22:30` PM.
         """
         now_dt = now or dt.datetime.now().astimezone()
-        day_seed = int(hashlib.md5(now_dt.strftime("%Y-%m-%d").encode()).hexdigest()[:8], 16)
-        start_offset_min = (day_seed % 25) - 10  # -10..+14 min around 08:15 -> 08:05..08:29
-        end_offset_min = ((day_seed >> 5) % 25) - 10
+        day_key = now_dt.strftime("%Y-%m-%d")
+        target_state_path = state_path or (DATA_DIR / "daily_quota_state.json")
 
-        start_dt = now_dt.replace(
-            hour=HUMAN_ACTIVE_START_HOUR_MIN[0],
-            minute=max(0, min(59, HUMAN_ACTIVE_START_HOUR_MIN[1] + start_offset_min)),
-            second=0,
-            microsecond=0,
-        )
-        end_dt = now_dt.replace(
-            hour=HUMAN_ACTIVE_END_HOUR_MIN[0],
-            minute=max(0, min(59, HUMAN_ACTIVE_END_HOUR_MIN[1] + end_offset_min)),
-            second=0,
-            microsecond=0,
-        )
+        start_offset_sec: Optional[int] = None
+        end_offset_sec: Optional[int] = None
+
+        st = safe_load_json(target_state_path, lambda: {})
+        if isinstance(st, dict):
+            win_map = st.get("daily_active_windows")
+            if isinstance(win_map, dict) and isinstance(win_map.get(day_key), dict):
+                entry = win_map[day_key]
+                s_val = entry.get("start_offset_sec")
+                e_val = entry.get("end_offset_sec")
+                if isinstance(s_val, int) and 0 <= s_val <= 12600 and isinstance(e_val, int) and 0 <= e_val <= 1800:
+                    start_offset_sec = s_val
+                    end_offset_sec = e_val
+
+        if start_offset_sec is None or end_offset_sec is None:
+            # Sample truly random offset for today (or deterministic fallback for non-today test dates)
+            today_real_key = dt.datetime.now().astimezone().strftime("%Y-%m-%d")
+            if day_key == today_real_key:
+                start_offset_sec = random.randint(0, 210 * 60)  # 06:00:00 .. 09:30:00
+                if start_offset_sec % 60 == 0:
+                    start_offset_sec = min(12600, start_offset_sec + random.randint(5, 52))
+                end_offset_sec = random.randint(0, 30 * 60)     # 22:00:00 .. 22:30:00
+                try:
+                    if not isinstance(st, dict):
+                        st = {}
+                    win_map = st.setdefault("daily_active_windows", {})
+                    if not isinstance(win_map, dict):
+                        win_map = {}
+                        st["daily_active_windows"] = win_map
+                    base_6am = now_dt.replace(hour=6, minute=0, second=0, microsecond=0) + dt.timedelta(seconds=start_offset_sec)
+                    base_10pm = now_dt.replace(hour=22, minute=0, second=0, microsecond=0) + dt.timedelta(seconds=end_offset_sec)
+                    win_map[day_key] = {
+                        "start_offset_sec": start_offset_sec,
+                        "end_offset_sec": end_offset_sec,
+                        "start_hm": base_6am.strftime("%H:%M:%S"),
+                        "end_hm": base_10pm.strftime("%H:%M:%S"),
+                    }
+                    atomic_write_json(target_state_path, st)
+                except Exception:
+                    pass
+            else:
+                day_seed = int(hashlib.sha256(f"human_window_v2::{day_key}".encode("utf-8")).hexdigest()[:8], 16)
+                # Ensure full coverage across 06:05..09:30 (300..12600s)
+                start_offset_sec = 300 + (day_seed % (12600 - 300 + 1))
+                end_offset_sec = (day_seed >> 12) % (30 * 60 + 1)
+
+        start_dt = now_dt.replace(hour=6, minute=0, second=0, microsecond=0) + dt.timedelta(seconds=int(start_offset_sec))
+        end_dt = now_dt.replace(hour=22, minute=0, second=0, microsecond=0) + dt.timedelta(seconds=int(end_offset_sec))
+        return start_dt, end_dt
+
+    @staticmethod
+    def is_within_human_active_hours(
+        now: Optional[dt.datetime] = None,
+        state_path: Optional[Path] = None,
+    ) -> Tuple[bool, int]:
+        """
+        Return `(is_active_now, seconds_until_active_window)`.
+        Active window starts at a daily randomized time between `06:00` and `09:30` AM
+        and ends around `22:00 – 22:30` PM local time.
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        start_dt, end_dt = HumanBehaviorGuard.get_daily_active_window(now=now_dt, state_path=state_path)
 
         if start_dt <= now_dt <= end_dt:
             return True, 0
@@ -542,8 +610,67 @@ class HumanBehaviorGuard:
         if now_dt < start_dt:
             return False, max(60, int((start_dt - now_dt).total_seconds()))
 
-        tomorrow_start = start_dt + dt.timedelta(days=1)
+        tomorrow_start, _ = HumanBehaviorGuard.get_daily_active_window(
+            now=now_dt + dt.timedelta(days=1),
+            state_path=state_path,
+        )
         return False, max(60, int((tomorrow_start - now_dt).total_seconds()))
+
+    @staticmethod
+    def get_weekly_rest_day_info(
+        now: Optional[dt.datetime] = None,
+        state_path: Optional[Path] = None,
+    ) -> Tuple[bool, int, str, int]:
+        """
+        Pick and persist 1 random rest day per ISO week (`Monday=0 .. Sunday=6`).
+        On the rest day, both `M4` (video rendering) and `M5` (social uploading) pause for the entire day.
+        Returns `(is_rest_day_today, rest_weekday_idx, rest_weekday_name_vi, seconds_until_tomorrow_start)`.
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        iso_year, iso_week, _ = now_dt.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        target_state_path = state_path or (DATA_DIR / "daily_quota_state.json")
+
+        rest_weekday: Optional[int] = None
+        st = safe_load_json(target_state_path, lambda: {})
+        if isinstance(st, dict):
+            rest_map = st.get("weekly_rest_days")
+            if isinstance(rest_map, dict):
+                val = rest_map.get(week_key)
+                if isinstance(val, int) and 0 <= val <= 6:
+                    rest_weekday = val
+                elif isinstance(val, dict) and isinstance(val.get("weekday"), int) and 0 <= val["weekday"] <= 6:
+                    rest_weekday = int(val["weekday"])
+
+        if rest_weekday is None:
+            rest_weekday = random.randint(0, 6)
+            try:
+                if not isinstance(st, dict):
+                    st = {}
+                rest_map = st.setdefault("weekly_rest_days", {})
+                if not isinstance(rest_map, dict):
+                    rest_map = {}
+                    st["weekly_rest_days"] = rest_map
+                rest_map[week_key] = {
+                    "weekday": rest_weekday,
+                    "weekday_name_vi": WEEKDAY_NAMES_VI[rest_weekday],
+                    "selected_at": now_dt.isoformat(timespec="seconds"),
+                }
+                atomic_write_json(target_state_path, st)
+            except Exception:
+                pass
+
+        rest_name_vi = WEEKDAY_NAMES_VI[rest_weekday]
+        is_rest_today = now_dt.weekday() == rest_weekday
+        if not is_rest_today:
+            return False, rest_weekday, rest_name_vi, 0
+
+        tomorrow_start, _ = HumanBehaviorGuard.get_daily_active_window(
+            now=now_dt + dt.timedelta(days=1),
+            state_path=target_state_path,
+        )
+        wait_sec = max(60, int((tomorrow_start - now_dt).total_seconds()))
+        return True, rest_weekday, rest_name_vi, wait_sec
 
     @staticmethod
     def sample_human_cooldown_seconds(min_floor_sec: int = 7200) -> int:
