@@ -1151,45 +1151,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f"setpts={pts_factor:.5f}*PTS,fps=30"
         )
 
-        # Adaptive Per-Shot Brightness / Gamma Lift (prevents dark night shots while protecting bright kitchen shots)
-        seg_lumas = [
-            s.mean_luma
-            for s in summary.samples
-            if (start_sec - 0.5) <= s.timestamp <= (end_sec + 0.5)
-        ]
-        if not seg_lumas and summary.samples:
-            seg_lumas = [s.mean_luma for s in summary.samples]
-        seg_luma = (sum(seg_lumas) / len(seg_lumas)) if seg_lumas else 115.0
-
-        if seg_luma < 95.0:
-            fg_eq = "eq=gamma=1.26:brightness=0.05:contrast=1.04:saturation=1.12"
-            bg_eq = "eq=gamma=1.34:brightness=0.07:saturation=1.15"
-        elif seg_luma < 118.0:
-            fg_eq = "eq=gamma=1.12:brightness=0.02:contrast=1.03:saturation=1.08"
-            bg_eq = "eq=gamma=1.16:brightness=0.03:saturation=1.10"
-        elif seg_luma <= 175.0:
-            fg_eq = "eq=gamma=1.02:brightness=0.0:contrast=1.03:saturation=1.06"
-            bg_eq = "eq=gamma=1.05:brightness=0.01:saturation=1.06"
-        else:
-            fg_eq = "eq=gamma=0.96:brightness=-0.01:contrast=1.02:saturation=1.04"
-            bg_eq = "eq=gamma=0.98:brightness=0.0:saturation=1.04"
-
+        # Keep 100% original video brightness, contrast, gamma, and color (zero `eq` code intervention)
         if layout_mode == "fullscreen" or summary.height > summary.width:
             vf = (
                 f"[0:v]{base_chain},setsar=1:1,"
                 f"scale=1080:1920:flags=lanczos:force_original_aspect_ratio=decrease,"
                 f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
-                f"setsar=1:1,setdar=9/16,{fg_eq},"
+                f"setsar=1:1,setdar=9/16,"
                 f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
             )
         else:
             vf = (
                 f"[0:v]{base_chain},split=2[vbg][vfg];"
                 f"[vbg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
-                f"boxblur=16:2,scale=1080:1920:flags=bilinear,"
-                f"{bg_eq},setsar=1:1[bg];"
-                f"[vfg]scale=1080:608:flags=lanczos,setsar=1:1,"
-                f"{fg_eq}[fg];"
+                f"boxblur=16:2,scale=1080:1920:flags=bilinear,setsar=1:1[bg];"
+                f"[vfg]scale=1080:608:flags=lanczos,setsar=1:1[fg];"
                 f"[bg][fg]overlay=x=0:y=656,setsar=1:1,setdar=9/16,"
                 f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
             )
