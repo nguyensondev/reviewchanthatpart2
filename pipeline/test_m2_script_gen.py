@@ -68,11 +68,11 @@ def run_verification() -> None:
         print(f"    M3 Claims Anchors: {len(draft.factual_claims_for_m3_audit)} SKU(s)", flush=True)
 
         assert len(draft.beats) == 5, f"Script {draft.script_id} must have 5 beats, got {len(draft.beats)}"
-        assert 25.0 <= draft.total_duration_sec <= 55.0, (
-            f"Script {draft.script_id} duration {draft.total_duration_sec}s out of [25, 55]s"
+        assert 28.0 <= draft.total_duration_sec <= 58.0, (
+            f"Script {draft.script_id} duration {draft.total_duration_sec}s out of [28, 58]s"
         )
-        assert 80 <= draft.total_word_count <= 165, (
-            f"Script {draft.script_id} word count {draft.total_word_count} out of [80, 165]"
+        assert 115 <= draft.total_word_count <= 225, (
+            f"Script {draft.script_id} word count {draft.total_word_count} out of [115, 225]"
         )
 
         has_honest_caveat_beat = False

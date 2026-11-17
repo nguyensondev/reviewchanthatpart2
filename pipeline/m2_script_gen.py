@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -49,8 +50,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 INPUT_M1_PATH = DATA_DIR / "m1_qualified_skus.json"
 OUTPUT_M2_PATH = DATA_DIR / "m2_script_drafts.json"
 
-DEFAULT_SPEAKING_RATE_WPS = 3.1
-MIN_BEAT_DURATION_SEC = 4.5
+DEFAULT_SPEAKING_RATE_WPS = 3.9
+MIN_BEAT_DURATION_SEC = 5.0
 MAX_ONSCREEN_WORDS = 8
 
 
@@ -61,18 +62,20 @@ def _trim_onscreen_text(text: str, max_words: int = MAX_ONSCREEN_WORDS) -> str:
     return " ".join(words[:max_words])
 
 
-def _cap_beat_voiceover(text: str, max_words: int = 31) -> str:
-    """Keep each beat's voiceover concise (<= 31 words) so 5-beat scripts stay within 80..165 words."""
+def _cap_beat_voiceover(text: str, max_words: int = 52) -> str:
+    """Normalize whitespace and ensure complete punctuation without truncating normal 25-48 word beats."""
     clean = " ".join(text.strip().split())
     words = clean.split()
     if len(words) <= max_words:
+        if clean and clean[-1] not in ".!?":
+            return clean.rstrip(",;:") + "."
         return clean
     prefix = " ".join(words[:max_words])
-    for sep in (".", "!", "?", ";", ","):
+    for sep in (".", "!", "?"):
         idx = prefix.rfind(sep)
-        if idx > 0 and len(prefix[:idx].split()) >= 18:
-            out = prefix[:idx].strip().rstrip(",;:")
-            return out + ("." if out and out[-1] not in ".!?" else "")
+        if idx > 0 and len(prefix[:idx].split()) >= 24:
+            out = prefix[:idx + 1].strip()
+            return out
     out = prefix.rstrip(",;:")
     return out + ("." if out and out[-1] not in ".!?" else "")
 
@@ -219,21 +222,33 @@ Mỗi kịch bản trong `scripts` BẮT BUỘC phải điền đúng `domain` (
 QUY TẮC CẤM LẶP MỞ BÀI & CẤM CÔNG THỨC RẬP KHUÔN:
 - Các kịch bản trong cùng đợt chạy TUYỆT ĐỐI KHÔNG được mở đầu giống nhau, không dùng chung một kiểu câu hỏi tu từ hay cụm chữ mở bài na ná nhau, và phải đổi hẳn nhịp điệu/giọng điệu dẫn dắt theo đúng `narrative_angle` đã chọn.
 
-QUY CHUẨN CẤU TRÚC TỪNG KỊCH BẢN (BẮT BUỘC ĐÚNG 5 PHÂN CẢNH / `beats` TỪ `beat_index = 1` ĐẾN `5`):
-- Với `SINGLE_SKU_DEEP_DIVE` (tổng ~95–125 từ tiếng Việt, trung bình ~19–25 từ mỗi beat):
-  + Beat 1 (`HOOK_FOIL_WARNING`): Mở đầu chạm nỗi đau + cảnh báo hàng rẻ lỗi trong `rejected_foils` (ghi rõ giá ~30k/39k từ dữ liệu).
-  + Beat 2 (`WINNER_REVEAL_SPECS`): Giới thiệu Quán quân (đúng hãng, đúng `model_code`, đúng dung tích/chất liệu trong M1).
-  + Beat 3 (`HEAD_TO_HEAD_PROOF`): Chứng minh điểm hơn Á quân dựa trên biên bản `why_winner_beats_runner_up_vi`.
-  + Beat 4 (`HONEST_CAVEAT`): Nói thẳng nhược điểm thực tế từ `honest_caveat_vi` một cách tự nhiên, chân thật.
-  + Beat 5 (`VALUE_VERDICT_CTA`): Chốt mức giá chuẩn (~`estimated_market_price_vnd`) và lời kêu gọi xem link ở giỏ hàng/bình luận.
-- Với `DUAL_TIER_COMPARISON` (tổng ~110–140 từ tiếng Việt, trung bình ~22–28 từ mỗi beat):
-  + Beat 1 (`HOOK_FOIL_WARNING`): Đặt câu hỏi chọn cỡ nhỏ hay cỡ lớn + né bẫy hàng OEM rẻ.
-  + Beat 2 (`DUAL_TIER_BREAKDOWN`): Đặt 2 Quán quân cạnh nhau (nêu đúng model, dung tích, chất liệu và giá chuẩn của CẢ HAI).
-  + Beat 3 (`HEAD_TO_HEAD_PROOF`): Phân tích tình huống sử dụng thực tế: ai nên lấy bản nhỏ, ai nên lấy bản lớn.
-  + Beat 4 (`HONEST_CAVEAT`): Nêu rõ giới hạn/nhược điểm thật của CẢ HAI mẫu (bên nhỏ chật khi xay nhiều, bên lớn cồng kềnh tốn tủ & nặng tay hơn).
-  + Beat 5 (`VALUE_VERDICT_CTA`): Chốt gợi ý chọn 1 trong 2 theo nhu cầu bếp + CTA xem link tham khảo bên dưới.
-- Với `COMBO_WORKFLOW_SYNERGY` (tổng ~110–145 từ tiếng Việt, trung bình ~22–28 từ mỗi beat):
-  + Beat 1 (`HOOK_FOIL_WARNING`), Beat 2 (`COMBO_STEP_1`), Beat 3 (`COMBO_STEP_2_TRANSITION`), Beat 4 (`HONEST_CAVEAT`), Beat 5 (`VALUE_VERDICT_CTA`).
+QUY CHUẨN CHIỀU SÂU NỘI DUNG, LỜI DẪN CHUYỂN Ý & CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1` ĐẾN `5`):
+- ĐỘ DÀI LINH HOẠT XỨNG TẦM VỚI GIÁ TRỊ CỦA SKU (KHÔNG VIẾT CỘC LỐC SƠ SÀI):
+  + Video Shorts/Reels có trần 60 giây; vùng thời lượng vàng giữ chân người xem tốt nhất là **38 giây – 53 giây** (tương ứng tổng cộng **140 – 195 từ tiếng Việt** cho cả 5 phân cảnh, trung bình **28 – 39 từ mỗi beat**).
+  + Tùy lượng thông tin và ưu điểm đắt giá của từng SKU trong hồ sơ M1 mà co giãn tự nhiên: SKU nhiều công nghệ/điểm sáng cần phân tích sâu thì viết đủ **165 – 195 từ**; SKU đơn giản hơn thì viết gọn **140 – 165 từ**, nhưng TUYỆT ĐỐI KHÔNG viết sơ sài dưới 135 từ và KHÔNG bỏ sót các `Ưu điểm nổi bật` của Quán quân!
+- NGHỆ THUẬT DẪN CHUYỆN & NỐI MẠCH (`Storytelling & Smooth Transitions`):
+  + CẤM đọc tên sản phẩm dài lê thê kiểu hóa đơn (VD cấm viết: *"Hãy chọn đúng Đèn treo màn hình chống chói bảo vệ mắt Baseus i-wok2 Series chính hãng Baseus"* -> Hãy dẫn tự nhiên như reviewer thật: *"Để trị dứt điểm cảnh chói màn hình đó, mình chuyển qua chiếc đèn treo màn hình Baseus i-wok2 này..."*).
+  + BẮT BUỘC có **lời dẫn chuyển ý (Transition Bridge)** ở đầu các Beat 2, 3, 4, 5 để 5 phân cảnh chảy liền thành 1 câu chuyện cuốn hút (VD: *"Khác biệt ăn tiền nhất nằm ở..."*, *"Đặt cạnh các mẫu cùng tầm giá mới thấy..."*, *"Tuy nhiên, có một điểm thực tế mình phải báo trước để bạn cân nhắc..."*, *"Tổng kết lại với mức giá khoảng..."*).
+  + Biến mọi **Thông số kỹ thuật khô khan** thành **Lợi ích & Cảm giác sử dụng thực tế ngoài đời** (giải thích rõ cơ chế đó giúp người dùng sướng hơn, nhàn hơn hay bền hơn thế nào).
+- CẤU TRÚC CHI TIẾT 5 PHÂN CẢNH:
+  + Với `SINGLE_SKU_DEEP_DIVE` (tổng **145 – 195 từ**, mỗi beat **28 – 40 từ**, câu văn trọn vẹn tuyệt đối không cụt ý):
+    * Beat 1 (`HOOK_FOIL_WARNING`): Mở màn bằng tình huống thực tế gây ức chế mà người xem thấy mình trong đó + bóc trần điểm yếu của hàng OEM/giá rẻ trong `rejected_foils` (nêu rõ mức giá hàng rẻ từ dữ liệu M1).
+    * Beat 2 (`WINNER_REVEAL_SPECS`): Lời dẫn chuyển sang giải pháp Quán quân (nêu chuẩn thương hiệu + `model_code`) + phân tích chất liệu/thiết kế/thông số cốt lõi mang lại trải nghiệm thực tế gì.
+    * Beat 3 (`HEAD_TO_HEAD_PROOF`): Đào sâu các điểm sáng (`highlight_pros_vi`) và lý do thắng Á quân (`why_winner_beats_runner_up_vi`) — làm nổi bật vì sao SKU này đáng đồng tiền bát gạo.
+    * Beat 4 (`HONEST_CAVEAT`): Lời dẫn chuyển ý công tâm + nói thẳng nhược điểm thực tế từ `honest_caveat_vi`, đặt trong ngữ cảnh khách quan (ai cần lưu ý, vì sao điểm trừ này vẫn chấp nhận được so với ưu điểm).
+    * Beat 5 (`VALUE_VERDICT_CTA`): Chốt rõ mẫu này sinh ra cho ai, nêu mức giá chuẩn (~`estimated_market_price_vnd`) và lời mời tự nhiên bấm xem gian hàng chính hãng ở giỏ hàng/bình luận.
+  + Với `DUAL_TIER_COMPARISON` (tổng **155 – 200 từ**, mỗi beat **30 – 41 từ**):
+    * Beat 1 (`HOOK_FOIL_WARNING`): Tình huống phân vân chọn kích cỡ/phân khúc + cảnh báo bẫy hàng OEM rẻ.
+    * Beat 2 (`DUAL_TIER_BREAKDOWN`): Đặt 2 Quán quân lên bàn cân (nêu chuẩn model, thông số cốt lõi và giá của CẢ HAI).
+    * Beat 3 (`HEAD_TO_HEAD_PROOF`): Mổ xẻ trải nghiệm thực tế: nhu cầu nào nên lấy bản nhỏ, nhu cầu nào bắt buộc phải lên bản lớn.
+    * Beat 4 (`HONEST_CAVEAT`): Nêu công tâm điểm đánh đổi thật của CẢ HAI mẫu.
+    * Beat 5 (`VALUE_VERDICT_CTA`): Chốt công thức chọn nhanh trong 5 giây + CTA xem link chính hãng bên dưới.
+  + Với `COMBO_WORKFLOW_SYNERGY` (tổng **155 – 200 từ**, mỗi beat **30 – 41 từ**):
+    * Beat 1 (`HOOK_FOIL_WARNING`): Cảnh bất tiện khi góc làm việc/căn bếp thiếu sự phối hợp đồng bộ + cảnh báo đồ OEM lẻ tẻ.
+    * Beat 2 (`COMBO_STEP_1`): Lời dẫn vào món thứ nhất trong Combo — thông số & điểm sáng giải quyết nửa đầu bài toán.
+    * Beat 3 (`COMBO_STEP_2_TRANSITION`): Cầu nối mượt mà sang món thứ hai — cách 2 món ghép lại tạo thành quy trình hoàn hảo.
+    * Beat 4 (`HONEST_CAVEAT`): Nói thẳng điểm cần lưu ý thực tế của bộ đôi này một cách khách quan.
+    * Beat 5 (`VALUE_VERDICT_CTA`): Tổng kết giá trị thực tế của cả combo + CTA tham khảo từng món chính hãng ở bình luận/giỏ hàng.
 
 RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
 - NGÔN NGỮ VOICEOVER & TIÊU ĐỀ: BẮT BUỘC viết bằng **tiếng Việt có dấu đầy đủ (UTF-8 chuẩn)**, đúng chính tả, văn phong nói tự nhiên mượt mà như reviewer thật (phục vụ đọc Voiceover TTS). TUYỆT ĐỐI KHÔNG viết tiếng Việt không dấu hoặc sai dấu chính tả.
@@ -340,9 +355,9 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
         total_words = 0
 
         for pos, b in enumerate(sorted_beats, start=1):
-            vo = _cap_beat_voiceover(b.voiceover_vi, max_words=31)
+            vo = _cap_beat_voiceover(b.voiceover_vi, max_words=52)
             wc = len(vo.split()) if vo else 0
-            dur = round(min(10.5, max(MIN_BEAT_DURATION_SEC, wc / DEFAULT_SPEAKING_RATE_WPS)), 1)
+            dur = round(min(13.5, max(MIN_BEAT_DURATION_SEC, wc / DEFAULT_SPEAKING_RATE_WPS)), 1)
             start_s = round(cursor_sec, 1)
             end_s = round(start_s + dur, 1)
             cursor_sec = end_s
@@ -442,11 +457,75 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
             affiliate_offers_attached=offers,
         )
 
+    def _build_rewrite_prompt(
+        self,
+        m1_data: M1QualifiedSKUsOutput,
+        m1_5_data: Optional[M15ComboCuratorOutput],
+        failed_audits: List[ dict ],
+        existing_drafts_by_id: Dict[str, ScriptDraftItem],
+    ) -> str:
+        base_gt = self._build_prompt(m1_data, m1_5_data=m1_5_data)
+        critique_blocks: List[str] = []
+        for idx, fa in enumerate(failed_audits, start=1):
+            sid = str(fa.get("script_id") or "")
+            old_draft = existing_drafts_by_id.get(sid)
+            old_beats_str = ""
+            if old_draft:
+                old_beats_str = "\n".join(
+                    f"    Beat {b.beat_index} [{b.beat_type}] ({b.word_count} từ): \"{b.voiceover_vi}\""
+                    for b in old_draft.beats
+                )
+            issues_str = "\n".join(
+                f"    - [{iss.get('severity')}] ({iss.get('issue_category')} @ Beat {iss.get('beat_index')}): "
+                f"{iss.get('description_vi')} -> Hướng xử lý: {iss.get('resolution_applied_vi')}"
+                for iss in (fa.get("issues_found") or [])
+            ) or "    - (Xem chỉ thị tổng hợp bên dưới)"
+            verdict_str = str(fa.get("auditor_verdict_vi") or "")
+            rewrite_inst = str(fa.get("rewrite_instructions_for_m2_vi") or "")
+
+            critique_blocks.append(
+                f"""
+=== KỊCH BẢN BỊ ĐÁNH TRƯỢT CẦN VIẾT LẠI #{idx}: `{sid}` ===
+- Định dạng (`script_format`): `{fa.get('script_format')}`
+- Chủ đề (`domain`): `{fa.get('domain')}` | Nhóm (`category_id`): `{fa.get('category_id')}`
+- Góc tiếp cận bắt buộc (`narrative_angle`): `{fa.get('narrative_angle')}`
+- Các SKU chính (`primary_sku_ids`): {fa.get('primary_sku_ids')}
+- Điểm QA/QC vòng trước: {fa.get('qaqc_score_breakdown', {}).get('total_qaqc_score_100', 0)}/100 (TRƯỢT - FAILED_NEEDS_REWRITE)
+- Kết luận của Giám khảo M3 (`auditor_verdict_vi`): {verdict_str}
+- CHỈ THỊ SỬA LỖI BẮT BUỘC TỪ M3 (`rewrite_instructions_for_m2_vi`):
+  {rewrite_inst}
+- Chi tiết các lỗi bị M3 bắt:
+{issues_str}
+- Bản nháp cũ bị đánh trượt (TUYỆT ĐỐI KHÔNG lặp lại lối viết sơ sài/lỗi này):
+{old_beats_str}
+""".strip()
+            )
+
+        return f"""
+{base_gt}
+
+======================================================================
+🚨 YÊU CẦU VIẾT LẠI KỊCH BẢN THEO BIÊN BẢN PHÊ BÌNH CỦA MODULE M3 QA/QC 🚨
+======================================================================
+Module kiểm định chất lượng M3 vừa đánh trượt (`FAILED_NEEDS_REWRITE`) {len(failed_audits)} kịch bản dưới đây.
+NHIỆM VỤ CỦA BẠN:
+1. Chỉ xuất đúng {len(failed_audits)} kịch bản cần viết lại trong mảng `scripts` (theo đúng thứ tự bên dưới, giữ đúng `script_format`, `domain`, `category_id`, `narrative_angle` và `primary_sku_ids` của từng kịch bản).
+2. KHẮC PHỤC TRIỆT ĐỂ 100% các lỗi và góp ý trong `rewrite_instructions_for_m2_vi` của M3:
+   - Mở bài (Beat 1) phải có Hook giàu hình ảnh thực tế, chạm đúng nỗi đau người dùng.
+   - Đầu các Beat 2, 3, 4, 5 BẮT BUỘC có lời dẫn chuyển ý mượt mà, tự nhiên.
+   - BẮT BUỘC nêu bật đầy đủ các điểm sáng (`Ưu điểm nổi bật` & `Thông số chuẩn` từ M1), biến thông số thành lợi ích trải nghiệm thật, độ dài đủ sâu **145 – 195 từ** (trung bình **29 – 39 từ/beat**, trọn vẹn câu chữ).
+   - Beat 4 (`HONEST_CAVEAT`) nói thẳng nhược điểm thực tế từ M1 nhưng đặt trong ngữ cảnh công bằng, khách quan.
+
+{chr(10).join(critique_blocks)}
+""".strip()
+
     def run(
         self,
         input_path: Path = INPUT_M1_PATH,
         output_path: Path = OUTPUT_M2_PATH,
         input_m1_5_path: Optional[Path] = None,
+        m3_feedback_path: Optional[Path] = None,
+        filter_retired_skus: bool = False,
     ) -> M2ScriptDraftsOutput:
         if not input_path.exists():
             raise FileNotFoundError(f"M2 input contract not found: {input_path}")
@@ -458,15 +537,15 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
         if not m1_data.qualified_categories:
             raise RuntimeError("M1 input has 0 qualified categories; cannot generate scripts.")
 
-        # Filter out any category whose primary winner is RETIRED_EXHAUSTED in sku_registry.json
-        surviving_cats = [
-            cat
-            for cat in m1_data.qualified_categories
-            if self.registry_mgr.is_solo_eligible(cat.primary_winner.candidate_id)
-            or self.registry_mgr.is_combo_eligible(cat.primary_winner.candidate_id)
-        ]
-        if surviving_cats:
-            m1_data = m1_data.model_copy(update={"qualified_categories": surviving_cats})
+        if filter_retired_skus:
+            surviving_cats = [
+                cat
+                for cat in m1_data.qualified_categories
+                if self.registry_mgr.is_solo_eligible(cat.primary_winner.candidate_id)
+                or self.registry_mgr.is_combo_eligible(cat.primary_winner.candidate_id)
+            ]
+            if surviving_cats:
+                m1_data = m1_data.model_copy(update={"qualified_categories": surviving_cats})
 
         m1_5_data: Optional[M15ComboCuratorOutput] = None
         cand_m1_5 = input_m1_5_path or OUTPUT_M1_5_PATH
@@ -521,13 +600,87 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
         system_instruction = (
             "Bạn là Đạo diễn Kịch bản Short-Video Review Trung Thực (Module M2) cho kênh Faceless 9:16.\n"
             "TRIẾT LÝ CỐT LÕI:\n"
-            "1. KHÔNG GƯỢNG ÉP COMBO: Nếu Module M1.5 đã duyệt `COMBO_APPROVED`, hãy viết 1 kịch bản `COMBO_WORKFLOW_SYNERGY` bám sát kịch bản phối hợp của M1.5. "
-            "Nếu M1.5 trả về `BYPASS` và các nhóm không phải cặp kích cỡ `SIZE_OR_TIER_PAIR`, hãy bỏ qua kịch bản combo.\n"
-            "2. CHÍNH XÁC 100% DỮ LIỆU M1: Mọi tên hãng, model_code, dung tích, chất liệu, giá cả và nhược điểm phải khớp đúng dữ liệu M1 cung cấp. Tuyệt đối không bịa thêm thông số.\n"
-            "3. TRUNG THỰC TĂNG UY TÍN: Mọi kịch bản đều bắt buộc có phân cảnh `HONEST_CAVEAT` ở `beat_index = 4` nói thẳng nhược điểm thực tế.\n"
-            "4. TIẾNG VIỆT CÓ DẤU CHUẨN XÁC & HOOK NGẮN <= 30 KÝ TỰ: Mọi trường văn bản (`title_vi`, `hook_title_short_vi`, `voiceover_vi`, `on_screen_text_vi`, `selection_rationale_vi`, `synergy_classification_reasoning_vi`) "
-            "BẮT BUỘC phải viết bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ, chuẩn chính tả (UTF-8), trong đó `hook_title_short_vi` dài từ 10 đến 30 ký tự."
+            "1. KỂ CHUYỆN CUỐN HÚT & NỐI MẠCH MƯỢT MÀ: Mỗi kịch bản phải có Hook mở màn giàu hình ảnh thực tế, có lời dẫn chuyển ý (transition) tự nhiên giữa cả 5 phân cảnh, và biến thông số kỹ thuật khô khan thành trải nghiệm đời thực sống động.\n"
+            "2. KHAI THÁC XỨNG TẦM ĐIỂM SÁNG CỦA SKU: Không viết sơ sài lướt qua! Phải làm nổi bật trọn vẹn các ưu điểm đắt giá (`highlight_pros_vi`) và thông số cốt lõi của SKU đã được M1 tuyển chọn (độ dài linh hoạt 145–195 từ tùy độ dày thông tin của SKU).\n"
+            "3. KHÔNG GƯỢNG ÉP COMBO: Nếu Module M1.5 đã duyệt `COMBO_APPROVED`, hãy viết 1 kịch bản `COMBO_WORKFLOW_SYNERGY` bám sát kịch bản phối hợp của M1.5.\n"
+            "4. CHÍNH XÁC 100% DỮ LIỆU M1 & NHƯỢC ĐIỂM CÔNG TÂM: Mọi tên hãng, model_code, thông số, giá cả phải khớp đúng M1. Phân cảnh `HONEST_CAVEAT` (Beat 4) nói thẳng nhược điểm thật nhưng đặt trong ngữ cảnh khách quan, công bằng.\n"
+            "5. TIẾNG VIỆT CÓ DẤU CHUẨN XÁC & HOOK NGẮN <= 30 KÝ TỰ: Mọi trường văn bản phải viết bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ, câu văn hoàn chỉnh không cụt ý, `hook_title_short_vi` dài từ 10 đến 30 ký tự."
         )
+
+        # Check if running in Targeted Rewrite Mode from M3 QA/QC feedback
+        if m3_feedback_path and m3_feedback_path.exists() and output_path.exists():
+            existing_m2 = M2ScriptDraftsOutput.model_validate_json(
+                output_path.read_text(encoding="utf-8")
+            )
+            m3_raw = json.loads(m3_feedback_path.read_text(encoding="utf-8"))
+            failed_audits = [
+                a
+                for a in (m3_raw.get("audited_scripts") or [])
+                if isinstance(a, dict) and a.get("qaqc_status") == "FAILED_NEEDS_REWRITE"
+            ]
+            if not failed_audits:
+                print("[M2 REWRITE] Không có kịch bản nào ở trạng thái FAILED_NEEDS_REWRITE. Giữ nguyên bản M2 hiện tại.", flush=True)
+                return existing_m2
+
+            print(
+                f"[M2 REWRITE] Nhận biên bản phê bình từ M3 -> Viết lại {len(failed_audits)} kịch bản bị đánh trượt...",
+                flush=True,
+            )
+            existing_by_id = {d.script_id: d for d in existing_m2.script_drafts}
+            rewrite_prompt = self._build_rewrite_prompt(
+                m1_data=m1_data,
+                m1_5_data=m1_5_data,
+                failed_audits=failed_audits,
+                existing_drafts_by_id=existing_by_id,
+            )
+            llm_resp, model_used = self.llm.generate_structured(
+                prompt=rewrite_prompt,
+                schema=LLMM2BatchGenerationResponse,
+                system_instruction=system_instruction,
+                prefer_lite=False,
+                temperature=0.35,
+            )
+
+            rewritten_by_id: Dict[str, ScriptDraftItem] = {}
+            for pos, fa in enumerate(failed_audits):
+                target_sid = str(fa.get("script_id") or "")
+                old_draft = existing_by_id.get(target_sid)
+                orig_idx = (
+                    next((i for i, d in enumerate(existing_m2.script_drafts, start=1) if d.script_id == target_sid), pos + 1)
+                )
+                raw_s = llm_resp.scripts[min(pos, len(llm_resp.scripts) - 1)] if llm_resp.scripts else None
+                if raw_s is None:
+                    continue
+                if old_draft:
+                    raw_s.script_format = old_draft.script_format
+                    raw_s.domain = old_draft.domain
+                    raw_s.category_id = old_draft.category_id
+                    raw_s.narrative_angle = old_draft.narrative_angle
+                    raw_s.primary_sku_ids = list(old_draft.primary_sku_ids)
+                new_draft = self._postprocess_script(
+                    idx=orig_idx,
+                    raw_script=raw_s,
+                    m1_data=m1_data,
+                    sku_by_id=sku_by_id,
+                    valid_runner_ids=valid_runner_ids,
+                    valid_foil_ids=valid_foil_ids,
+                )
+                new_draft.script_id = target_sid
+                rewritten_by_id[target_sid] = new_draft
+                print(
+                    f"     -> [REWRITTEN {new_draft.script_id} ({model_used})] "
+                    f"{new_draft.total_word_count} words | {new_draft.total_duration_sec}s",
+                    flush=True,
+                )
+
+            merged_drafts = [
+                rewritten_by_id.get(d.script_id, d) for d in existing_m2.script_drafts
+            ]
+            existing_m2.script_drafts = merged_drafts
+            existing_m2.generated_at = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+            existing_m2.llm_models_used = self.llm.models_used_history
+            atomic_write_text(output_path, existing_m2.model_dump_json(indent=2))
+            return existing_m2
 
         prompt = self._build_prompt(m1_data, m1_5_data=m1_5_data)
         llm_resp, model_used = self.llm.generate_structured(
@@ -535,7 +688,7 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
             schema=LLMM2BatchGenerationResponse,
             system_instruction=system_instruction,
             prefer_lite=False,
-            temperature=0.25,
+            temperature=0.3,
         )
 
         print(
@@ -622,10 +775,20 @@ def main() -> None:
         default=OUTPUT_M2_PATH,
         help="Output JSON path for M3 (default: data/m2_script_drafts.json)",
     )
+    parser.add_argument(
+        "--rewrite-from-m3",
+        type=Path,
+        default=None,
+        help="Optional M3 output JSON path to rewrite only FAILED_NEEDS_REWRITE scripts.",
+    )
     args = parser.parse_args()
 
     engine = M2ScriptGeneratorEngine()
-    engine.run(input_path=args.input, output_path=args.output)
+    engine.run(
+        input_path=args.input,
+        output_path=args.output,
+        m3_feedback_path=args.rewrite_from_m3,
+    )
 
 
 if __name__ == "__main__":

@@ -48,9 +48,10 @@ INPUT_M2_PATH = DATA_DIR / "m2_script_drafts.json"
 INPUT_M1_PATH = DATA_DIR / "m1_qualified_skus.json"
 OUTPUT_M3_PATH = DATA_DIR / "m3_approved_scripts.json"
 
-DEFAULT_SPEAKING_RATE_WPS = 3.1
-MIN_BEAT_DURATION_SEC = 4.5
+DEFAULT_SPEAKING_RATE_WPS = 3.9
+MIN_BEAT_DURATION_SEC = 5.0
 MAX_ONSCREEN_WORDS = 8
+MIN_PASSING_QAQC_SCORE = 82.0
 
 _VI_ACCENTED_RE = re.compile(
     r"[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
@@ -254,16 +255,41 @@ class M3QAQCEngine:
                 )
             )
 
-        if not (25.0 <= draft.total_duration_sec <= 55.0):
+        if draft.total_word_count < 120:
+            issues.append(
+                QAQCIssueItem(
+                    issue_category="SHALLOW_SKU_HIGHLIGHTS",
+                    severity="NEEDS_M2_REWRITE",
+                    beat_index=None,
+                    description_vi=(
+                        f"Kịch bản quá ngắn và sơ sài ({draft.total_word_count} từ < 120 từ), "
+                        "chưa đủ chiều sâu để làm nổi bật các highlight đắt giá của SKU."
+                    ),
+                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 viết sâu sắc hơn (145–195 từ).",
+                )
+            )
+        elif draft.total_word_count > 230:
+            issues.append(
+                QAQCIssueItem(
+                    issue_category="PACING_OR_LENGTH",
+                    severity="NEEDS_M2_REWRITE",
+                    beat_index=None,
+                    description_vi=(
+                        f"Kịch bản quá dài ({draft.total_word_count} từ > 230 từ), có nguy cơ vượt trần 60s của Shorts."
+                    ),
+                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 cô đọng lại trong vùng 145–195 từ.",
+                )
+            )
+        elif not (28.0 <= draft.total_duration_sec <= 58.0):
             issues.append(
                 QAQCIssueItem(
                     issue_category="PACING_OR_LENGTH",
                     severity="WARNING_AUTO_PATCHED",
                     beat_index=None,
                     description_vi=(
-                        f"Tổng thời lượng {draft.total_duration_sec}s nằm ngoài ngưỡng tối ưu 25s–55s."
+                        f"Tổng thời lượng ước tính {draft.total_duration_sec}s nằm ngoài vùng chuẩn 28s–58s."
                     ),
-                    resolution_applied_vi="Yêu cầu tầng Auto-Patch tinh chỉnh độ dài lời thoại vừa nhịp 9:16.",
+                    resolution_applied_vi="Cân chỉnh nhịp đọc và phụ đề vừa khung 9:16.",
                 )
             )
 
@@ -295,6 +321,19 @@ class M3QAQCEngine:
             )
 
         for beat in draft.beats:
+            if beat.word_count < 16:
+                issues.append(
+                    QAQCIssueItem(
+                        issue_category="WEAK_HOOK_OR_TRANSITION",
+                        severity="NEEDS_M2_REWRITE",
+                        beat_index=beat.beat_index,
+                        description_vi=(
+                            f"Phân cảnh #{beat.beat_index} quá ngắn ({beat.word_count} từ < 16 từ), "
+                            "câu văn cộc lốc thiếu lời dẫn và thiếu thông tin."
+                        ),
+                        resolution_applied_vi="Yêu cầu M2 viết lại phân cảnh này đầy đặn (26–40 từ) có lời dẫn tự nhiên.",
+                    )
+                )
             if len(beat.voiceover_vi.strip()) >= 15 and not _VI_ACCENTED_RE.search(beat.voiceover_vi):
                 issues.append(
                     QAQCIssueItem(
@@ -379,21 +418,22 @@ class M3QAQCEngine:
             )
 
         system_instruction = (
-            "Bạn là Kiểm toán viên QA/QC Độc Lập (Module M3) kiểm định chéo kịch bản của M2 với hồ sơ sự thật gốc M1.\n"
-            "NHIỆM VỤ BẮT BUỘC:\n"
-            "1. ĐỐI CHIẾU SỰ THẬT (`FACT_HALLUCINATION`): Mọi thông số kỹ thuật (dung tích, chất liệu, công suất, cơ chế kéo tay hay điện, kích thước, giá bán, thời gian bảo hành) "
-            "phải KHỚP 100% với HỒ SƠ M1. Nếu M2 tự bịa (ví dụ biến cối kéo tay nhựa PS 180ml 89k thành máy điện thủy tinh 500ml 300W 250k bảo hành 5 năm), "
-            "PHẢI bắt lỗi `FACT_HALLUCINATION` (`WARNING_AUTO_PATCHED`), trừ điểm `fact_accuracy_score` của bản gốc và VIẾT LẠI cho đúng 100% sự thật M1 trong `beats_patched` (`was_auto_patched=true`).\n"
-            "2. KIỂM TRA NHƯỢC ĐIỂM THẬT (`MISSING_HONEST_CAVEAT`): Phân cảnh `HONEST_CAVEAT` (Beat 4) PHẢI nói rõ đúng nhược điểm thực tế từ M1 (VD: 180ml chỉ xay gia vị ít không xay được thịt; 900ml cồng kềnh tốn diện tích & nặng tay khi đầy). "
-            "Nếu M2 khen hoàn hảo tuyệt đối hoặc che giấu nhược điểm/nói sai khả năng, PHẢI bắt lỗi `MISSING_HONEST_CAVEAT` (`WARNING_AUTO_PATCHED`), trừ điểm `honest_caveat_score` và VIẾT LẠI beat 4 cho trung thực (`was_auto_patched=true`).\n"
-            "3. CHỐNG GƯỢNG ÉP COMBO (`FORCED_COMBO_LOGIC`): Nếu hai SKU cùng công năng khác cỡ mà ép mua cả hai thay vì so sánh chọn 1, bắt lỗi `FORCED_COMBO_LOGIC`.\n"
-            "4. GIỮ NGUYÊN GÓC KỂ CHUYỆN (`narrative_angle`) VÀ PHONG CÁCH MỞ BÀI RIÊNG: Khi sửa lỗi hoặc chuẩn hóa phụ đề (`APPROVED_WITH_AUTO_PATCH`), PHẢI tôn trọng và giữ nguyên cá tính mở bài cũng như cấu trúc dẫn chuyện đặc trưng theo `Angle` của từng kịch bản — tuyệt đối KHÔNG làm phẳng các kịch bản thành cùng một văn mẫu giống nhau.\n"
-            "5. TÁCH ĐÔI TTS VOICEOVER & PHỤ ĐỀ HIỂN THỊ (BẮT BUỘC CHO MỌI BEAT):\n"
-            "   - `tts_voiceover_vi`: Văn nói tiếng Việt CÓ DẤU ĐẦY ĐỦ tự nhiên cho máy đọc (VD: 'một trăm tám mươi mi-li-lít', 'tám mươi chín nghìn đồng').\n"
-            "   - `subtitle_text_vi`: BẮT BUỘC LÀ CÂU PHỤ ĐỀ ĐẦY ĐỦ NỘI DUNG KHỚP VỚI `tts_voiceover_vi` (TUYỆT ĐỐI KHÔNG chép `on_screen_text_vi` vào đây!), chỉ đổi số/đơn vị sang ký hiệu gọn (`180ml`, `900ml`, `89k`, `195k`, `30k`, `39k`, `125x142mm`, `Inox 304`).\n"
+            "Bạn là Giám khảo Kiểm định Chất lượng Kịch bản Khắt khe & Khách quan (Module M3 QA/QC) đối chiếu kịch bản M2 với hồ sơ gốc M1.\n"
+            "NHIỆM VỤ CỐT LÕI (KHÓ TÍNH, CÔNG TÂM, KHÔNG DỄ DÃI CHO QUA KỊCH BẢN SƠ SÀI):\n"
+            "1. ĐỐI CHIẾU SỰ THẬT (`FACT_HALLUCINATION`): Mọi thông số kỹ thuật, chất liệu, công suất, giá bán phải KHỚP 100% với HỒ SƠ M1. Nếu M2 tự bịa thông số/giá (VD biến cối kéo tay nhựa PS 180ml 89k thành máy điện thủy tinh 500ml 300W 250k), "
+            "BẮT BUỘC gắn lỗi `FACT_HALLUCINATION` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `fact_accuracy_score <= 12.0`, đặt `needs_m2_rewrite = true` và ghi rõ yêu cầu sửa vào `rewrite_instructions_for_m2_vi` (đồng thời vẫn điền bản sửa đúng trong `beats_patched` với `was_auto_patched=true`).\n"
+            "2. KIỂM TRA NHƯỢC ĐIỂM THẬT & SỰ CÔNG TÂM (`MISSING_HONEST_CAVEAT`): Phân cảnh `HONEST_CAVEAT` (Beat 4) PHẢI nói rõ đúng nhược điểm thực tế từ M1 nhưng đặt trong ngữ cảnh khách quan (ai cần lưu ý, vì sao chấp nhận được). "
+            "Nếu M2 che giấu nhược điểm hoặc khen hoàn hảo tuyệt đối, BẮT BUỘC gắn `MISSING_HONEST_CAVEAT` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `honest_caveat_score <= 10.0`, đặt `needs_m2_rewrite = true` (và điền bản sửa trung thực trong `beats_patched` với `was_auto_patched=true`).\n"
+            "3. KIỂM ĐỊNH ĐỘ SÂU HIGHLIGHT CỦA SKU (`SHALLOW_SKU_HIGHLIGHTS`): Đối chiếu kịch bản với các `Ưu điểm thật` và `Thông số thật` của Quán quân trong M1. Nếu kịch bản viết hời hợt, bỏ sót điểm sáng quan trọng của SKU, hoặc chỉ đọc tên thông số khô khan như tờ rơi mà không giải thích lợi ích trải nghiệm thực tế, "
+            "hãy gắn `SHALLOW_SKU_HIGHLIGHTS` (`severity=\"NEEDS_M2_REWRITE\"`), trừ điểm và đặt `needs_m2_rewrite = true`, chỉ rõ highlight nào bị bỏ sót trong `rewrite_instructions_for_m2_vi`.\n"
+            "4. KIỂM ĐỊNH HOOK MỞ BÀI & LỜI DẪN CHUYỂN Ý (`WEAK_HOOK_OR_TRANSITION`): Mở bài (Beat 1) phải chạm trúng tình huống thực tế cuốn hút; đầu các Beat 2, 3, 4, 5 phải có lời dẫn nối mạch mượt mà; câu văn không được cụt ý hay rời rạc. Nếu mở bài nhạt hoặc thiếu lời dẫn chuyển ý, gắn `WEAK_HOOK_OR_TRANSITION` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `natural_tone_and_logic_score <= 15.0` và đặt `needs_m2_rewrite = true`.\n"
+            "5. CHỐNG GƯỢNG ÉP COMBO (`FORCED_COMBO_LOGIC`): Nếu hai SKU cùng công năng khác cỡ mà ép mua cả hai thay vì so sánh chọn 1, gắn `FORCED_COMBO_LOGIC` (`severity=\"NEEDS_M2_REWRITE\"`).\n"
+            "6. NGƯỠNG ĐẬU KHẮT KHE (`>= 82.0/100` & `needs_m2_rewrite = false`): Chỉ khi kịch bản đã thực sự cuốn hút, đầy đủ highlight của SKU, lời dẫn mượt mà, đúng sự thật 100% và có nhược điểm công tâm mới được đặt `needs_m2_rewrite = false` và tổng điểm `>= 82.0`. Nếu `needs_m2_rewrite = true`, BẮT BUỘC viết `rewrite_instructions_for_m2_vi` thật chi tiết (chỉ rõ từng beat cần sửa gì để M2 viết lại không lặp lại lỗi cũ).\n"
+            "7. TÁCH ĐÔI TTS VOICEOVER & PHỤ ĐỀ HIỂN THỊ (BẮT BUỘC ĐIỀN ĐỦ 5 BEAT TRONG `beats_patched`):\n"
+            "   - `tts_voiceover_vi`: Văn nói tiếng Việt CÓ DẤU ĐẦY ĐỦ tự nhiên cho máy đọc (VD: 'một trăm tám mươi mi-li-lít', 'bốn trăm hai mươi nghìn đồng').\n"
+            "   - `subtitle_text_vi`: BẮT BUỘC LÀ CÂU PHỤ ĐỀ ĐẦY ĐỦ NỘI DUNG KHỚP VỚI `tts_voiceover_vi` (TUYỆT ĐỐI KHÔNG chép `on_screen_text_vi` vào đây!), chỉ đổi số/đơn vị sang ký hiệu gọn (`180ml`, `900ml`, `89k`, `420k`, `1,85tr`, `57°`, `4000 DPI`, `Inox 304`).\n"
             "   - `on_screen_text_vi`: Chữ tiêu đề ngắn gọn tối đa 8 từ, tiếng Việt có dấu.\n"
-            "6. CHUẨN HÓA TIÊU ĐỀ (`patched_title_vi`): Luôn điền `patched_title_vi` là tiêu đề kịch bản bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ chuẩn UTF-8 (khôi phục dấu nếu `title_vi` gốc thiếu dấu).\n"
-            "7. Lưu ý `was_auto_patched`: Chỉ đặt `true` cho những beat có lỗi nội dung/sự thật/nhược điểm/mất dấu cần viết lại; nếu beat gốc đã đúng sự thật và chỉ tách định dạng `subtitle_text_vi`, đặt `was_auto_patched=false`."
+            "   - `was_auto_patched`: Đặt `true` nếu beat đó có lỗi thực tế/nhược điểm/diễn đạt đã được chỉnh lại; `false` nếu nội dung gốc đã chuẩn."
         )
 
         prompt = f"""
@@ -403,15 +443,15 @@ class M3QAQCEngine:
 === DANH SÁCH KỊCH BẢN TỪ MODULE M2 CẦN THẨM ĐỊNH ===
 {chr(10).join(draft_blocks)}
 
-Hãy xuất JSON theo đúng schema `LLMM3BatchAuditResponse` trả về đủ kết quả thẩm định (`script_audits`) cho từng `script_id`, kèm đầy đủ 5 phân cảnh trong `beats_patched` cho mỗi kịch bản.
+Hãy chấm điểm khắt khe, khách quan và xuất JSON theo đúng schema `LLMM3BatchAuditResponse` trả về kết quả thẩm định (`script_audits`) cho từng `script_id`, kèm `needs_m2_rewrite`, `rewrite_instructions_for_m2_vi` và đầy đủ 5 phân cảnh trong `beats_patched`.
 """.strip()
 
         resp, _ = self.llm.generate_structured(
             prompt=prompt,
             schema=LLMM3BatchAuditResponse,
             system_instruction=system_instruction,
-            prefer_lite=True,
-            temperature=0.1,
+            prefer_lite=False,
+            temperature=0.15,
         )
         return resp
 
@@ -544,12 +584,36 @@ Hãy xuất JSON theo đúng schema `LLMM3BatchAuditResponse` trả về đủ k
             has_critical_issue = l1_crit or any(
                 i.severity == "CRITICAL_REJECT" for i in combined_issues
             )
+            has_rewrite_issue = (
+                (llm_res is not None and bool(getattr(llm_res, "needs_m2_rewrite", False)))
+                or total_qaqc < MIN_PASSING_QAQC_SCORE
+                or any(i.severity == "NEEDS_M2_REWRITE" for i in combined_issues)
+            )
             has_warning_patched = any(
                 i.severity == "WARNING_AUTO_PATCHED" for i in combined_issues
             )
 
+            rewrite_instructions_vi = (
+                llm_res.rewrite_instructions_for_m2_vi.strip()
+                if llm_res and getattr(llm_res, "rewrite_instructions_for_m2_vi", "")
+                else ""
+            )
+            if has_rewrite_issue and not rewrite_instructions_vi:
+                issue_notes = "; ".join(
+                    f"[Beat {i.beat_index or 'All'} - {i.issue_category}] {i.description_vi} ({i.resolution_applied_vi})"
+                    for i in combined_issues
+                    if i.severity in ("NEEDS_M2_REWRITE", "CRITICAL_REJECT", "WARNING_AUTO_PATCHED")
+                )
+                rewrite_instructions_vi = (
+                    f"Điểm QA/QC đạt {total_qaqc}/100 (< {MIN_PASSING_QAQC_SCORE}). "
+                    f"Yêu cầu M2 viết lại khắc phục các điểm sau: {issue_notes or verdict_vi}"
+                )
+
             if has_critical_issue:
                 status: QAQCStatus = "REJECTED"
+                rejected_cnt += 1
+            elif has_rewrite_issue:
+                status = "FAILED_NEEDS_REWRITE"
                 rejected_cnt += 1
             elif any_beat_patched or has_warning_patched:
                 status = "APPROVED_WITH_AUTO_PATCH"
@@ -563,7 +627,8 @@ Hãy xuất JSON theo đúng schema `LLMM3BatchAuditResponse` trả về đủ k
 
             print(
                 f"     -> [{status}] {draft.script_id} | QAQC={total_qaqc}/100 | "
-                f"Issues={len(combined_issues)} | Duration={total_dur}s ({total_words}w)",
+                f"Issues={len(combined_issues)} | Duration={total_dur}s ({total_words}w)"
+                + (f" | Lý do cần viết lại: {rewrite_instructions_vi[:120]}..." if status == "FAILED_NEEDS_REWRITE" else ""),
                 flush=True,
             )
 
@@ -589,6 +654,7 @@ Hãy xuất JSON theo đúng schema `LLMM3BatchAuditResponse` trả về đủ k
                     qaqc_status=status,
                     qaqc_score_breakdown=score_breakdown,
                     auditor_verdict_vi=verdict_vi,
+                    rewrite_instructions_for_m2_vi=rewrite_instructions_vi,
                     issues_found=combined_issues,
                     title_vi=patched_title,
                     hook_title_short_vi=short_hook,

@@ -25,18 +25,18 @@ T = TypeVar("T", bound=BaseModel)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
-# Verified working Free-Tier model chains (ordered by speed & reliability on nested schemas)
+# Verified working Free-Tier model chains (ordered by quality & reliability on nested schemas)
 REASONING_MODEL_CHAIN: List[str] = [
+    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
     "gemma-4-31b-it",
 ]
 
 EXTRACTION_MODEL_CHAIN: List[str] = [
     "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
     "gemma-4-31b-it",
 ]
 
@@ -86,7 +86,7 @@ class FreeTierGeminiClient:
     def __init__(
         self,
         min_interval_sec: float = 2.0,
-        timeout_ms: int = 25000,
+        timeout_ms: int = 45000,
         env_path: Path = DEFAULT_ENV_PATH,
     ) -> None:
         self.api_keys = get_api_keys(env_path)

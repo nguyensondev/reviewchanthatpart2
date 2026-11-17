@@ -195,8 +195,47 @@ def print_pipeline_status() -> None:
     print("======================================================================", flush=True)
 
 
+MAX_M2_M3_REWRITE_ROUNDS = 2
+
+
+def run_m2_m3_with_qaqc_loop(qm: DailyQuotaManager, max_rewrite_rounds: int = MAX_M2_M3_REWRITE_ROUNDS) -> None:
+    """
+    Execute M2 -> M3 QA/QC with an closed-loop feedback cycle:
+      - Round 0: M2 generates initial scripts -> M3 audits strictly (pass threshold >= 82/100).
+      - If any script is marked `FAILED_NEEDS_REWRITE`, M3 provides `rewrite_instructions_for_m2_vi`
+        and updates `video_registry.json` (`FAILED_NEEDS_REWRITE`).
+      - M2 then rewrites ONLY the failed scripts using M3's critique (up to `max_rewrite_rounds`),
+        and M3 re-audits until passed or max rounds reached.
+    """
+    m2_engine = M2ScriptGeneratorEngine()
+    m3_engine = M3QAQCEngine()
+
+    m2_engine.run()
+    m3_out = m3_engine.run(quota_mgr=qm)
+
+    for round_idx in range(1, max_rewrite_rounds + 1):
+        failed_scripts = [
+            s for s in m3_out.audited_scripts if s.qaqc_status == "FAILED_NEEDS_REWRITE"
+        ]
+        if not failed_scripts:
+            break
+        print(
+            f"\n=== [QA/QC FEEDBACK LOOP - VÒNG {round_idx}/{max_rewrite_rounds}] "
+            f"M3 đánh trượt {len(failed_scripts)} kịch bản -> Gửi biên bản góp ý bắt M2 viết lại ===",
+            flush=True,
+        )
+        for fs in failed_scripts:
+            print(
+                f"  • [{fs.script_id}] ({fs.qaqc_score_breakdown.total_qaqc_score_100}/100): "
+                f"{fs.rewrite_instructions_for_m2_vi}",
+                flush=True,
+            )
+        m2_engine.run(m3_feedback_path=Path(__file__).resolve().parent.parent / "data" / "m3_approved_scripts.json")
+        m3_out = m3_engine.run(quota_mgr=qm)
+
+
 def run_planning_batch(topic_hint: Optional[str] = None, max_categories: int = 3) -> None:
-    """Run M0 -> M1 -> M1.5 -> M2 -> M3 once to discover fresh categories & queue approved scripts."""
+    """Run M0 -> M1 -> M1.5 -> M2 <-> M3 once to discover fresh categories & queue approved scripts."""
     qm = DailyQuotaManager()
     s_used, s_rem, _ = qm.get_script_quota_status()
     if s_rem <= 0:
@@ -207,12 +246,11 @@ def run_planning_batch(topic_hint: Optional[str] = None, max_categories: int = 3
         )
         return
 
-    print("\n=== [STEP C - PLAN] Running M0 -> M1 -> M1.5 -> M2 -> M3 Discovery & Script Batch ===", flush=True)
+    print("\n=== [STEP C - PLAN] Running M0 -> M1 -> M1.5 -> M2 <-> M3 Discovery & Script Batch ===", flush=True)
     M0AutonomousDiscoveryEngine().run(topic_hint=topic_hint, max_categories=max_categories)
     M1SmartFilterEngine().run()
     M15ComboCuratorEngine().run()
-    M2ScriptGeneratorEngine().run()
-    M3QAQCEngine().run(quota_mgr=qm)
+    run_m2_m3_with_qaqc_loop(qm=qm)
 
 
 def run_single_render_step(ignore_2h_cooldown: bool = False) -> None:

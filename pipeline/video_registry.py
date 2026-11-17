@@ -25,7 +25,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_VIDEO_REGISTRY_PATH = PROJECT_ROOT / "data" / "video_registry.json"
 SURPLUS_SCRIPT_TTL_DAYS = 14
 
-VideoLifecycleStatus = Literal["SCRIPT_APPROVED", "RENDERED", "PUBLISHED"]
+VideoLifecycleStatus = Literal[
+    "SCRIPT_APPROVED",
+    "FAILED_NEEDS_REWRITE",
+    "RENDERED",
+    "PUBLISHED",
+]
 
 
 class VideoRegistryEntry(BaseModel):
@@ -39,6 +44,7 @@ class VideoRegistryEntry(BaseModel):
     primary_sku_ids: List[str] = Field(default_factory=list)
     normalized_sku_keys: List[str] = Field(default_factory=list)
     status: VideoLifecycleStatus = "SCRIPT_APPROVED"
+    qaqc_rewrite_feedback_vi: str = ""
     approved_at: str
     m3_run_id: str = ""
     rendered_at: Optional[str] = None
@@ -83,10 +89,15 @@ class VideoRegistryManager:
         added_or_updated = 0
 
         for s in scripts:
-            if s.qaqc_status not in ("APPROVED", "APPROVED_WITH_AUTO_PATCH"):
+            if s.qaqc_status not in ("APPROVED", "APPROVED_WITH_AUTO_PATCH", "FAILED_NEEDS_REWRITE"):
                 continue
             existing = items.get(s.script_id)
-            current_status: VideoLifecycleStatus = "SCRIPT_APPROVED"
+            if s.qaqc_status == "FAILED_NEEDS_REWRITE":
+                current_status: VideoLifecycleStatus = "FAILED_NEEDS_REWRITE"
+                feedback_str = getattr(s, "rewrite_instructions_for_m2_vi", "") or s.auditor_verdict_vi
+            else:
+                current_status = "SCRIPT_APPROVED"
+                feedback_str = ""
             if isinstance(existing, dict) and existing.get("status") in ("RENDERED", "PUBLISHED"):
                 current_status = existing["status"]
 
@@ -105,6 +116,7 @@ class VideoRegistryManager:
                 primary_sku_ids=list(s.primary_sku_ids),
                 normalized_sku_keys=list(norm_keys),
                 status=current_status,
+                qaqc_rewrite_feedback_vi=feedback_str,
                 approved_at=(
                     existing.get("approved_at", now_iso)
                     if isinstance(existing, dict) and existing.get("approved_at")

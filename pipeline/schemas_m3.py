@@ -27,12 +27,14 @@ from pipeline.schemas_m2 import (
 QAQCStatus = Literal[
     "APPROVED",
     "APPROVED_WITH_AUTO_PATCH",
+    "FAILED_NEEDS_REWRITE",
     "REJECTED",
 ]
 
 IssueSeverity = Literal[
     "INFO",
     "WARNING_AUTO_PATCHED",
+    "NEEDS_M2_REWRITE",
     "CRITICAL_REJECT",
 ]
 
@@ -40,6 +42,8 @@ IssueCategory = Literal[
     "FACT_HALLUCINATION",
     "MISSING_HONEST_CAVEAT",
     "FORCED_COMBO_LOGIC",
+    "WEAK_HOOK_OR_TRANSITION",
+    "SHALLOW_SKU_HIGHLIGHTS",
     "PACING_OR_LENGTH",
     "TTS_OR_SUBTITLE_FORMAT",
     "VISUAL_CLIP_MISSING",
@@ -108,6 +112,10 @@ class AuditedScriptItem(BaseModel):
     qaqc_status: QAQCStatus
     qaqc_score_breakdown: QAQCScoreBreakdown100
     auditor_verdict_vi: str = Field(..., description="Kết luận thẩm định tổng quan của M3")
+    rewrite_instructions_for_m2_vi: str = Field(
+        default="",
+        description="Góp ý chi tiết từ M3 chỉ rõ lý do FAIL (thiếu highlight nào, câu nào rời rạc/sơ sài) để M2 viết lại",
+    )
     issues_found: List[QAQCIssueItem] = Field(default_factory=list)
     title_vi: str
     hook_title_short_vi: str = Field(
@@ -185,6 +193,14 @@ class LLMScriptAuditResult(BaseModel):
         description="Tiêu đề mở bài cực ngắn (0-30 ký tự) bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ",
     )
     auditor_verdict_vi: str
+    needs_m2_rewrite: bool = Field(
+        default=False,
+        description="True nếu kịch bản sơ sài, thiếu lời dẫn cuốn hút, bỏ sót highlight quan trọng của SKU hoặc dưới 82 điểm -> bắt buộc M2 viết lại",
+    )
+    rewrite_instructions_for_m2_vi: str = Field(
+        default="",
+        description="Chỉ thị góp ý cụ thể cho M2: nêu rõ beat nào cần viết lại, highlight nào của SKU bị thiếu, cách sửa lời dẫn",
+    )
     issues_found: List[QAQCIssueItem] = Field(default_factory=list)
     beats_patched: List[LLMAuditedBeatPatch] = Field(default_factory=list)
 

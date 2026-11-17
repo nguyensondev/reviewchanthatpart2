@@ -122,10 +122,15 @@ def run_verification() -> None:
     beat4 = next(b for b in audited_fault.beats if b.beat_index == 4)
     print(f"  Patched Beat 2 Sub : {beat2.subtitle_text_vi} (was_auto_patched={beat2.was_auto_patched})", flush=True)
     print(f"  Patched Beat 4 Sub : {beat4.subtitle_text_vi} (was_auto_patched={beat4.was_auto_patched})", flush=True)
+    print(f"  M3 Feedback to M2  : {audited_fault.rewrite_instructions_for_m2_vi}", flush=True)
 
-    assert audited_fault.qaqc_status == "APPROVED_WITH_AUTO_PATCH", (
-        f"Expected APPROVED_WITH_AUTO_PATCH, got {audited_fault.qaqc_status}"
+    assert audited_fault.qaqc_status in ("FAILED_NEEDS_REWRITE", "APPROVED_WITH_AUTO_PATCH"), (
+        f"Expected FAILED_NEEDS_REWRITE or APPROVED_WITH_AUTO_PATCH, got {audited_fault.qaqc_status}"
     )
+    if audited_fault.qaqc_status == "FAILED_NEEDS_REWRITE":
+        assert audited_fault.rewrite_instructions_for_m2_vi.strip(), (
+            "FAILED_NEEDS_REWRITE must provide non-empty rewrite_instructions_for_m2_vi for M2!"
+        )
     assert "FACT_HALLUCINATION" in detected_cats, f"Failed to detect FACT_HALLUCINATION in {detected_cats}"
     assert "MISSING_HONEST_CAVEAT" in detected_cats, f"Failed to detect MISSING_HONEST_CAVEAT in {detected_cats}"
     assert beat2.was_auto_patched is True, "Beat 2 should be marked was_auto_patched=True"

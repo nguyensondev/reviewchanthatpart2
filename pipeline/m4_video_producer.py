@@ -36,6 +36,7 @@ import json
 import random
 import re
 import shutil
+import ssl
 import subprocess
 import time
 import urllib.request
@@ -87,6 +88,9 @@ BGM_DIR = PROJECT_ROOT / "assets" / "bgm"
 FONT_BOLD_PATH = MacOSLegacyRuntime.resolve_font_path(bold=True)
 FONT_REG_PATH = MacOSLegacyRuntime.resolve_font_path(bold=False)
 FFMPEG_THREADS = str(MacOSLegacyRuntime.optimal_ffmpeg_threads())
+MacOSLegacyRuntime.ensure_runtime_path()
+_CA_BUNDLE_PATH = MacOSLegacyRuntime.resolve_ca_bundle_path()
+_SSL_CTX = ssl.create_default_context(cafile=_CA_BUNDLE_PATH) if _CA_BUNDLE_PATH else ssl.create_default_context()
 MAX_CONTINUOUS_SHOT_SEC = 3.6
 
 TIKTOK_TTS_API_URL = "https://ottsy.weilbyte.dev/api/generation"
@@ -113,6 +117,7 @@ class SampledFrameMeta:
     edge_density: float
     sharpness: float
     std_luma: float
+    mean_luma: float = 115.0
 
 
 @dataclass
@@ -358,7 +363,7 @@ def _render_pil_rounded_card(
     d.rounded_rectangle(
         [0, 0, w - 1, h - 1],
         radius=28,
-        fill=(18, 20, 24, 218),
+        fill=(34, 42, 58, 195),
         outline=(*accent, 255),
         width=3,
     )
@@ -386,7 +391,7 @@ def _render_pil_price_card(
     d.rounded_rectangle(
         [0, 0, w - 1, h - 1],
         radius=30,
-        fill=(18, 20, 24, 225),
+        fill=(34, 42, 58, 202),
         outline=(255, 196, 52, 255),
         width=3,
     )
@@ -541,7 +546,12 @@ class M4VideoProducerEngine:
         sidecar_path = self.cache_dir / f"{video_id}.scan.json"
         if sidecar_path.exists():
             cached_json = safe_load_json(sidecar_path, lambda: None)
-            if isinstance(cached_json, dict) and cached_json.get("samples"):
+            if (
+                isinstance(cached_json, dict)
+                and cached_json.get("samples")
+                and isinstance(cached_json["samples"][0], dict)
+                and "mean_luma" in cached_json["samples"][0]
+            ):
                 try:
                     summary = VideoScanSummary(
                         video_id=video_id,
@@ -628,6 +638,7 @@ class M4VideoProducerEngine:
                             edge_density=round(edge_density, 4),
                             sharpness=round(sharpness, 2),
                             std_luma=round(std_luma, 2),
+                            mean_luma=round(mean_luma, 1),
                         )
                     )
             frame_idx += 1
@@ -665,37 +676,52 @@ class M4VideoProducerEngine:
         )
         return summary
 
-    def _pick_faceless_window(
+    def _try_pick_unused_from_summary(
         self,
         summary: VideoScanSummary,
         target_dur: float,
         used_windows: Dict[str, List[Tuple[float, float]]],
-    ) -> Tuple[float, float, bool, float]:
+        use_opencv_fallback: bool = False,
+    ) -> Optional[Tuple[float, float, bool, float]]:
         """
-        Select a clean, caption-free, face-free segment `[start_s, end_s]` for a clause.
-        If `summary.verified_clean_intervals` is populated, cycles cleanly through those
-        studio-verified intervals without overlapping until all intervals have been used.
+        Try to select a 100% UNUSED (`0% overlap`) clean segment `[st, et]` from `summary`.
+        Dynamically slices long verified intervals (e.g. a 29s clean close-up interval yields
+        9 distinct sequential sub-shots without ever repeating a timestamp).
+        Returns `None` if `summary` has no unused clean footage left.
         """
         existing = used_windows.setdefault(summary.video_id, [])
 
-        if summary.verified_clean_intervals:
-            # Prefer unused verified clean intervals first
-            for allow_reuse in (False, True):
-                for a, b in summary.verified_clean_intervals:
-                    iv_len = b - a
-                    if iv_len < 1.6:
-                        continue
-                    already_used = any(abs(a - u_a) < 0.4 for u_a, _ in existing)
-                    if already_used and not allow_reuse:
-                        continue
-                    # Take up to target_dur (or full clean interval if shorter; gentle slow-mo <= 1.35x handles the rest)
-                    take_len = min(iv_len, max(2.0, target_dur))
-                    st = round(a, 2)
-                    et = round(a + take_len, 2)
-                    existing.append((st, et))
-                    return st, et, True, 180.0
+        def _overlaps(st: float, et: float, pad: float = 0.25) -> bool:
+            for u_st, u_et in existing:
+                if not (et + pad <= u_st or st - pad >= u_et):
+                    return True
+            return False
 
-        win_len = min(max(target_dur * 0.82, 2.4), max(2.4, summary.duration_sec - 2.0))
+        desired_take = min(max(2.1, target_dur * 0.92), 3.6)
+
+        if summary.verified_clean_intervals:
+            for a, b in summary.verified_clean_intervals:
+                iv_len = b - a
+                if iv_len < 1.6:
+                    continue
+                # Scan along [a, b] in 0.25s steps to find the first non-overlapping sub-slice
+                cursor = a
+                while cursor + 1.6 <= b + 0.05:
+                    avail = b - cursor
+                    take_len = min(avail, max(2.0, desired_take))
+                    if take_len < 1.6:
+                        break
+                    st = round(cursor, 2)
+                    et = round(cursor + take_len, 2)
+                    if not _overlaps(st, et, pad=0.20):
+                        existing.append((st, et))
+                        return st, et, True, 180.0
+                    cursor = round(cursor + 0.5, 2)
+
+        if not use_opencv_fallback and summary.verified_clean_intervals:
+            return None
+
+        win_len = min(max(target_dur * 0.85, 2.3), max(2.3, summary.duration_sec - 2.0))
         candidates: List[Tuple[float, bool, bool, float, float]] = []
         for s in summary.samples:
             st = s.timestamp
@@ -705,31 +731,117 @@ class M4VideoProducerEngine:
             inner = [x for x in summary.samples if st <= x.timestamp <= et]
             any_face = any(x.has_face for x in inner) or s.has_face
             any_cap = any(x.has_caption_or_card for x in inner) or s.has_caption_or_card
+            if any_face or any_cap:
+                continue
             avg_sharp = sum(x.sharpness for x in inner) / len(inner) if inner else s.sharpness
             avg_std = sum(x.std_luma for x in inner) / len(inner) if inner else s.std_luma
             if avg_std < 14.0:
                 continue
-            candidates.append((st, any_face, any_cap, avg_sharp, s.face_ratio))
+            if not _overlaps(st, et, pad=0.6):
+                candidates.append((st, any_face, any_cap, avg_sharp, s.face_ratio))
 
-        def _overlaps(st: float, et: float, pad: float) -> bool:
-            for u_st, u_et in existing:
-                if not (et + pad <= u_st or st - pad >= u_et):
-                    return True
-            return False
+        if candidates:
+            best = sorted(candidates, key=lambda x: (x[4], -x[3]))[0]
+            st = round(best[0], 2)
+            et = round(min(st + win_len, summary.duration_sec - 0.5), 2)
+            existing.append((st, et))
+            return st, et, True, round(best[3], 2)
 
-        for pad, req_clean in [(4.0, True), (1.5, True), (0.5, False), (0.0, False)]:
-            pool = [
-                c
-                for c in candidates
-                if (not req_clean or (not c[1] and not c[2])) and not _overlaps(c[0], c[0] + win_len, pad)
+        return None
+
+    def _pick_faceless_window_from_pool(
+        self,
+        pool: List[VideoScanSummary],
+        target_dur: float,
+        used_windows: Dict[str, List[Tuple[float, float]]],
+        rotation_idx: int = 0,
+    ) -> Tuple[VideoScanSummary, float, float, bool, float]:
+        """
+        Multi-Video Pool Zero-Repeat Selector:
+          1. Rotates across all verified videos for the SKU (`pool`) and picks a 100% unused
+             (`0% overlap`) sub-window from `verified_clean_intervals`.
+          2. If verified intervals are exhausted, checks 100% unused OpenCV clean windows
+             across all videos in `pool`.
+          3. Emergency Least-Used Fallback: if an ultra-long script ever exhausts every unique
+             second across all videos in `pool`, selects the sub-window with the lowest usage count
+             and furthest time distance from recent shots (NEVER repeating index 0 back-to-back).
+        """
+        if not pool:
+            raise RuntimeError("Empty video summary pool passed to _pick_faceless_window_from_pool")
+
+        n = len(pool)
+        ordered_pool = [pool[(rotation_idx + i) % n] for i in range(n)]
+        # Also prioritize videos with the least used duration so far for balanced multi-video variety
+        ordered_pool.sort(
+            key=lambda s: sum(max(0.0, u_b - u_a) for u_a, u_b in used_windows.get(s.video_id, []))
+        )
+
+        # Pass 1: Strict zero-overlap from verified clean intervals across all videos in pool
+        for summary in ordered_pool:
+            res = self._try_pick_unused_from_summary(
+                summary, target_dur, used_windows, use_opencv_fallback=False
+            )
+            if res is not None:
+                return summary, res[0], res[1], res[2], res[3]
+
+        # Pass 2: Strict zero-overlap from OpenCV face-free & caption-free scan across all videos in pool
+        for summary in ordered_pool:
+            res = self._try_pick_unused_from_summary(
+                summary, target_dur, used_windows, use_opencv_fallback=True
+            )
+            if res is not None:
+                return summary, res[0], res[1], res[2], res[3]
+
+        # Pass 3: Least-used & furthest-back clean interval across all videos (strictly prevents repeating [0.0, 2.3])
+        best_choice: Optional[Tuple[int, int, VideoScanSummary, float, float]] = None
+        for summary in ordered_pool:
+            existing = used_windows.setdefault(summary.video_id, [])
+            intervals = summary.verified_clean_intervals or [
+                (s.timestamp, min(summary.duration_sec - 0.5, s.timestamp + 2.6))
+                for s in summary.samples
+                if not s.has_face and not s.has_caption_or_card
             ]
-            if pool:
-                best = sorted(pool, key=lambda x: (x[1], x[2], x[4], -x[3]))[0]
-                st = round(best[0], 2)
-                et = round(min(st + win_len, summary.duration_sec - 0.5), 2)
-                existing.append((st, et))
-                return st, et, (not best[1]), round(best[3], 2)
+            for a, b in intervals:
+                if b - a < 1.6:
+                    continue
+                take_len = min(b - a, max(2.0, min(target_dur, 3.4)))
+                st = round(a, 2)
+                et = round(a + take_len, 2)
+                overlap_cnt = sum(
+                    1 for u_a, u_b in existing if not (et <= u_a + 0.1 or st >= u_b - 0.1)
+                )
+                last_seen_dist = 999
+                for rev_idx, (u_a, u_b) in enumerate(reversed(existing), start=1):
+                    if not (et <= u_a + 0.1 or st >= u_b - 0.1):
+                        last_seen_dist = rev_idx
+                        break
+                cand_key = (overlap_cnt, -last_seen_dist)
+                if best_choice is None or cand_key < (best_choice[0], best_choice[1]):
+                    best_choice = (overlap_cnt, -last_seen_dist, summary, st, et)
 
+        if best_choice is not None:
+            chosen_sum, st, et = best_choice[2], best_choice[3], best_choice[4]
+            used_windows.setdefault(chosen_sum.video_id, []).append((st, et))
+            return chosen_sum, st, et, True, 160.0
+
+        fallback_sum = ordered_pool[0]
+        st, et, ff, sh = self._pick_faceless_window(fallback_sum, target_dur, used_windows)
+        return fallback_sum, st, et, ff, sh
+
+    def _pick_faceless_window(
+        self,
+        summary: VideoScanSummary,
+        target_dur: float,
+        used_windows: Dict[str, List[Tuple[float, float]]],
+    ) -> Tuple[float, float, bool, float]:
+        """Single-summary wrapper around `_try_pick_unused_from_summary`."""
+        res = self._try_pick_unused_from_summary(
+            summary, target_dur, used_windows, use_opencv_fallback=True
+        )
+        if res is not None:
+            return res
+        existing = used_windows.setdefault(summary.video_id, [])
+        win_len = min(max(target_dur * 0.82, 2.4), max(2.4, summary.duration_sec - 2.0))
         fallback_st = round(min(5.0, max(0.0, summary.duration_sec * 0.18)), 2)
         fallback_et = round(min(fallback_st + win_len, max(fallback_st + 2.0, summary.duration_sec - 0.5)), 2)
         existing.append((fallback_st, fallback_et))
@@ -752,17 +864,21 @@ class M4VideoProducerEngine:
         tmp_mp3 = out_mp3.with_suffix(".tmp.mp3")
         tmp_mp3.unlink(missing_ok=True)
         atempo_prefix = ""
+        is_female = locked_voice in ("BV074_streaming", "vi-VN-HoaiMyNeural")
+        provider_alive = getattr(self, "_tts_provider_alive", None)
+        if provider_alive is None:
+            provider_alive = {"tiktok": True, "edge": True}
+            self._tts_provider_alive = provider_alive
 
-        if locked_voice in ("BV074_streaming", "BV075_streaming"):
+        synth_done = False
+
+        if locked_voice in ("BV074_streaming", "BV075_streaming") and provider_alive.get("tiktok", True):
             chunks = _split_utf8_chunks(clean_text, max_bytes=240)
             chunk_mp3s: List[Path] = []
             try:
                 for ch_idx, chunk in enumerate(chunks, start=1):
-                    backoff_secs = [0.8, 1.8, 3.5, 6.0, 10.0]
                     ch_path = out_mp3.with_name(f"{out_mp3.stem}_p{ch_idx:02d}.mp3")
                     ch_tmp = ch_path.with_suffix(".tmp.mp3")
-                    ch_ok = False
-                    last_exc: Optional[Exception] = None
 
                     def _call_tiktok(c_text: str = chunk) -> bytes:
                         payload = json.dumps({"text": c_text, "voice": locked_voice}).encode("utf-8")
@@ -772,39 +888,20 @@ class M4VideoProducerEngine:
                             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
                             method="POST",
                         )
-                        with urllib.request.urlopen(req, timeout=15) as resp:
+                        with urllib.request.urlopen(req, timeout=5, context=_SSL_CTX) as resp:
                             body = json.loads(resp.read().decode("utf-8"))
                         if not body.get("success") or not body.get("data"):
                             raise RuntimeError(f"TikTok TTS unsuccessful response: {body}")
                         return base64.b64decode(body["data"])
 
-                    for attempt, wait_s in enumerate(backoff_secs, start=1):
-                        ch_tmp.unlink(missing_ok=True)
-                        try:
-                            mp3_bytes = await asyncio.to_thread(_call_tiktok)
-                            if len(mp3_bytes) > 500:
-                                ch_tmp.write_bytes(mp3_bytes)
-                                ch_tmp.replace(ch_path)
-                                chunk_mp3s.append(ch_path)
-                                ch_ok = True
-                                await asyncio.sleep(0.22)
-                                break
-                        except Exception as exc:
-                            last_exc = exc
-                            print(
-                                f"  [TikTok TTS retry {attempt}/{len(backoff_secs)}] "
-                                f"voice={locked_voice} chunk={chunk[:28]!r} ({exc}); cooling {wait_s:.1f}s",
-                                flush=True,
-                            )
-                        ch_tmp.unlink(missing_ok=True)
-                        if attempt < len(backoff_secs):
-                            await asyncio.sleep(wait_s)
-
-                    if not ch_ok:
-                        raise RuntimeError(
-                            f"TikTok TTS ({locked_voice}) failed on chunk '{chunk[:40]}' after "
-                            f"{len(backoff_secs)} attempts: {last_exc}"
-                        )
+                    ch_tmp.unlink(missing_ok=True)
+                    mp3_bytes = await asyncio.to_thread(_call_tiktok)
+                    if len(mp3_bytes) <= 500:
+                        raise RuntimeError("TikTok TTS returned empty audio payload")
+                    ch_tmp.write_bytes(mp3_bytes)
+                    ch_tmp.replace(ch_path)
+                    chunk_mp3s.append(ch_path)
+                    await asyncio.sleep(0.18)
 
                 if len(chunk_mp3s) == 1:
                     chunk_mp3s[0].replace(out_mp3)
@@ -839,45 +936,125 @@ class M4VideoProducerEngine:
                         for p in chunk_mp3s:
                             p.unlink(missing_ok=True)
 
-                atempo_prefix = "atempo=1.05,"
+                atempo_prefix = ""
+                synth_done = True
+            except Exception as exc:
+                provider_alive["tiktok"] = False
+                print(
+                    f"  [M4.3 TTS] TikTok proxy unavailable ({exc}); switching locked voice '{locked_voice}' "
+                    f"to resilient Google Neural TTS for full-video voice uniformity.",
+                    flush=True,
+                )
+                tmp_mp3.unlink(missing_ok=True)
+                for p in chunk_mp3s:
+                    p.unlink(missing_ok=True)
+
+        elif locked_voice.startswith("vi-VN-") and provider_alive.get("edge", True):
+            try:
+                tmp_mp3.unlink(missing_ok=True)
+                comm = edge_tts.Communicate(text=clean_text, voice=locked_voice, rate=VOICE_RATE)
+                await comm.save(str(tmp_mp3))
+                if tmp_mp3.exists() and tmp_mp3.stat().st_size > 500:
+                    tmp_mp3.replace(out_mp3)
+                    synth_done = True
+                    await asyncio.sleep(0.3)
+                else:
+                    raise RuntimeError("Edge TTS returned empty file")
+            except Exception as exc:
+                provider_alive["edge"] = False
+                print(
+                    f"  [M4.3 TTS] Edge TTS unavailable ({exc}); switching locked voice '{locked_voice}' "
+                    f"to resilient Google Neural TTS for full-video voice uniformity.",
+                    flush=True,
+                )
+                tmp_mp3.unlink(missing_ok=True)
+
+        if not synth_done:
+            # Resilient Google Neural TTS fallback (preserves 100% single-voice uniformity across all clauses)
+            chunks = _split_utf8_chunks(clean_text, max_bytes=195)
+            chunk_mp3s = []
+            try:
+                for ch_idx, chunk in enumerate(chunks, start=1):
+                    ch_path = out_mp3.with_name(f"{out_mp3.stem}_g{ch_idx:02d}.mp3")
+                    ch_tmp = ch_path.with_suffix(".tmp.mp3")
+
+                    def _call_google_tts(c_text: str = chunk) -> bytes:
+                        q_enc = urllib.parse.quote(c_text)
+                        url = (
+                            f"https://translate.googleapis.com/translate_tts"
+                            f"?ie=UTF-8&client=tw-ob&tl=vi&q={q_enc}"
+                        )
+                        req = urllib.request.Request(
+                            url,
+                            headers={"User-Agent": "Mozilla/5.0"},
+                            method="GET",
+                        )
+                        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
+                            return resp.read()
+
+                    last_g_exc: Optional[Exception] = None
+                    ch_ok = False
+                    for attempt, wait_s in enumerate((0.5, 1.5, 3.0), start=1):
+                        ch_tmp.unlink(missing_ok=True)
+                        try:
+                            mp3_bytes = await asyncio.to_thread(_call_google_tts)
+                            if len(mp3_bytes) > 400:
+                                ch_tmp.write_bytes(mp3_bytes)
+                                ch_tmp.replace(ch_path)
+                                chunk_mp3s.append(ch_path)
+                                ch_ok = True
+                                await asyncio.sleep(0.12)
+                                break
+                        except Exception as exc:
+                            last_g_exc = exc
+                            await asyncio.sleep(wait_s)
+                    if not ch_ok:
+                        raise RuntimeError(
+                            f"Google Neural TTS failed on chunk '{chunk[:40]}': {last_g_exc}"
+                        )
+
+                if len(chunk_mp3s) == 1:
+                    chunk_mp3s[0].replace(out_mp3)
+                else:
+                    list_txt = out_mp3.with_suffix(".gparts.txt")
+                    list_txt.write_text(
+                        "\n".join(f"file '{p.name}'" for p in chunk_mp3s),
+                        encoding="utf-8",
+                    )
+                    try:
+                        _run_cmd(
+                            [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                list_txt.name,
+                                "-c:a",
+                                "libmp3lame",
+                                "-b:a",
+                                "64k",
+                                str(tmp_mp3),
+                            ],
+                            cwd=out_mp3.parent,
+                        )
+                        tmp_mp3.replace(out_mp3)
+                    finally:
+                        list_txt.unlink(missing_ok=True)
+                        for p in chunk_mp3s:
+                            p.unlink(missing_ok=True)
+
+                if is_female:
+                    atempo_prefix = "atempo=1.24,"
+                else:
+                    atempo_prefix = "asetrate=24000*0.89,aresample=24000,atempo=1.34,"
             except Exception:
                 tmp_mp3.unlink(missing_ok=True)
                 for p in chunk_mp3s:
                     p.unlink(missing_ok=True)
                 raise
-
-        elif locked_voice.startswith("vi-VN-"):
-            backoff_secs = [1.5, 4.0, 8.0, 12.0]
-            synth_ok = False
-            last_exc = None
-            for attempt, wait_s in enumerate(backoff_secs, start=1):
-                tmp_mp3.unlink(missing_ok=True)
-                try:
-                    comm = edge_tts.Communicate(text=clean_text, voice=locked_voice, rate=VOICE_RATE)
-                    await comm.save(str(tmp_mp3))
-                    if tmp_mp3.exists() and tmp_mp3.stat().st_size > 500:
-                        tmp_mp3.replace(out_mp3)
-                        synth_ok = True
-                        await asyncio.sleep(0.6)
-                        break
-                except Exception as exc:
-                    last_exc = exc
-                    print(
-                        f"  [Edge TTS retry {attempt}/{len(backoff_secs)}] voice={locked_voice} "
-                        f"{clean_text[:28]}... ({exc}); cooling {wait_s:.1f}s",
-                        flush=True,
-                    )
-                tmp_mp3.unlink(missing_ok=True)
-                if attempt < len(backoff_secs):
-                    await asyncio.sleep(wait_s)
-
-            if not synth_ok or not out_mp3.exists() or out_mp3.stat().st_size <= 500:
-                out_mp3.unlink(missing_ok=True)
-                raise RuntimeError(
-                    f"Locked voice {locked_voice} failed for clause '{clean_text[:60]}': {last_exc}"
-                )
-        else:
-            raise ValueError(f"Unsupported locked TTS voice: {locked_voice}")
 
         _run_cmd(
             [
@@ -888,7 +1065,7 @@ class M4VideoProducerEngine:
                 "-af",
                 f"{atempo_prefix}silenceremove=start_periods=1:start_silence=0.03:start_threshold=-45dB,"
                 "areverse,silenceremove=start_periods=1:start_silence=0.05:start_threshold=-45dB,"
-                "areverse,apad=pad_dur=0.08",
+                "areverse,apad=pad_dur=0.14",
                 "-ar",
                 "44100",
                 "-ac",
@@ -974,12 +1151,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f"setpts={pts_factor:.5f}*PTS,fps=30"
         )
 
+        # Adaptive Per-Shot Brightness / Gamma Lift (prevents dark night shots while protecting bright kitchen shots)
+        seg_lumas = [
+            s.mean_luma
+            for s in summary.samples
+            if (start_sec - 0.5) <= s.timestamp <= (end_sec + 0.5)
+        ]
+        if not seg_lumas and summary.samples:
+            seg_lumas = [s.mean_luma for s in summary.samples]
+        seg_luma = (sum(seg_lumas) / len(seg_lumas)) if seg_lumas else 115.0
+
+        if seg_luma < 95.0:
+            fg_eq = "eq=gamma=1.26:brightness=0.05:contrast=1.04:saturation=1.12"
+            bg_eq = "eq=gamma=1.34:brightness=0.07:saturation=1.15"
+        elif seg_luma < 118.0:
+            fg_eq = "eq=gamma=1.12:brightness=0.02:contrast=1.03:saturation=1.08"
+            bg_eq = "eq=gamma=1.16:brightness=0.03:saturation=1.10"
+        elif seg_luma <= 175.0:
+            fg_eq = "eq=gamma=1.02:brightness=0.0:contrast=1.03:saturation=1.06"
+            bg_eq = "eq=gamma=1.05:brightness=0.01:saturation=1.06"
+        else:
+            fg_eq = "eq=gamma=0.96:brightness=-0.01:contrast=1.02:saturation=1.04"
+            bg_eq = "eq=gamma=0.98:brightness=0.0:saturation=1.04"
+
         if layout_mode == "fullscreen" or summary.height > summary.width:
             vf = (
                 f"[0:v]{base_chain},setsar=1:1,"
                 f"scale=1080:1920:flags=lanczos:force_original_aspect_ratio=decrease,"
                 f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
-                f"setsar=1:1,setdar=9/16,eq=contrast=1.03:saturation=1.05,"
+                f"setsar=1:1,setdar=9/16,{fg_eq},"
                 f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
             )
         else:
@@ -987,9 +1187,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"[0:v]{base_chain},split=2[vbg][vfg];"
                 f"[vbg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
                 f"boxblur=16:2,scale=1080:1920:flags=bilinear,"
-                f"eq=brightness=-0.10:saturation=0.9,setsar=1:1[bg];"
+                f"{bg_eq},setsar=1:1[bg];"
                 f"[vfg]scale=1080:608:flags=lanczos,setsar=1:1,"
-                f"eq=contrast=1.03:saturation=1.06[fg];"
+                f"{fg_eq}[fg];"
                 f"[bg][fg]overlay=x=0:y=656,setsar=1:1,setdar=9/16,"
                 f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
             )
@@ -1074,15 +1274,100 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             affiliate_short_links=links,
         )
 
+    @staticmethod
+    def _estimate_clean_footage_sec(summary: VideoScanSummary) -> float:
+        if summary.verified_clean_intervals:
+            return round(sum(max(0.0, b - a) for a, b in summary.verified_clean_intervals if b - a >= 1.6), 2)
+        clean_cnt = sum(1 for s in summary.samples if not s.has_face and not s.has_caption_or_card)
+        return round(clean_cnt * 0.5, 2)
+
+    def _discover_supplemental_sku_videos(
+        self,
+        brand: str,
+        model_code: Optional[str],
+        candidate_id: str,
+        existing_ids: set[str],
+        needed_sec: float,
+    ) -> List[VideoScanSummary]:
+        """
+        Automatic YouTube Supplemental Video Discovery:
+        If a SKU's existing video pool has insufficient clean footage (< 55s) to cover a full
+        48-55s video without repeating shots, automatically search YouTube via `yt-dlp` for
+        additional official/clean product videos of the same SKU, filter out blocked 3rd-party
+        reviewers, download and scan until `needed_sec` is satisfied.
+        """
+        from pipeline.schemas_m0 import YouTubeEvidenceClip
+
+        found: List[VideoScanSummary] = []
+        acc_sec = 0.0
+        model_q = (model_code or candidate_id.replace("_", " ")).strip()
+        queries = [
+            f"ytsearch8:{brand} {model_q} official",
+            f"ytsearch8:{brand} {model_q} unboxing",
+        ]
+        for q in queries:
+            if acc_sec >= needed_sec or len(found) >= 2:
+                break
+            try:
+                proc = subprocess.run(
+                    ["yt-dlp", "--dump-json", "--flat-playlist", q],
+                    capture_output=True,
+                    text=True,
+                    timeout=18,
+                )
+                if proc.returncode != 0:
+                    continue
+                for line in proc.stdout.strip().splitlines():
+                    if acc_sec >= needed_sec or len(found) >= 2:
+                        break
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    vid = d.get("id")
+                    dur = int(d.get("duration") or 0)
+                    title = str(d.get("title") or "")
+                    channel = str(d.get("channel") or d.get("uploader") or "")
+                    if not vid or vid in existing_ids or dur < 25 or dur > 240:
+                        continue
+                    clip_obj = YouTubeEvidenceClip(
+                        video_id=vid,
+                        url=f"https://www.youtube.com/watch?v={vid}",
+                        title=title,
+                        channel=channel,
+                        duration_sec=dur,
+                        max_height=1080,
+                        view_count=int(d.get("view_count") or 0),
+                        matched_query=q,
+                    )
+                    if not self.brand_gate.is_official_brand_clip(clip_obj, brand, model_code):
+                        continue
+                    existing_ids.add(vid)
+                    local_p = self._ensure_source_video(vid, clip_obj.url)
+                    if local_p:
+                        scan_sum = self._scan_video_faceless(vid, local_p)
+                        c_sec = self._estimate_clean_footage_sec(scan_sum)
+                        if c_sec >= 8.0:
+                            found.append(scan_sum)
+                            acc_sec += c_sec
+                            print(
+                                f"[M4.1+] Auto-supplemented SKU '{candidate_id}' with official clip {vid} "
+                                f"(+{c_sec:.1f}s clean footage)",
+                                flush=True,
+                            )
+            except Exception:
+                continue
+        return found
+
     def _resolve_official_clips_for_script(self, script: AuditedScriptItem) -> Dict[str, VideoScanSummary]:
         """
-        Resolve and scan ONLY verified official brand videos for every SKU in `script`.
-        Never falls back to third-party shop or user review videos.
+        Resolve and scan ALL verified official brand videos for every SKU in `script`
+        (forming a multi-video pool per SKU so M4 never has to repeat a clip segment).
         """
         clip_summaries: Dict[str, VideoScanSummary] = {}
         claims_by_cid = {c.candidate_id: c for c in script.verified_factual_claims}
 
-        # 1. Resolve curated/verified official videos for each primary SKU claim
+        # 1. Resolve ALL curated/verified official videos for each primary SKU claim
         for claim in script.verified_factual_claims:
             official_clips = self.brand_gate.filter_and_resolve_official_clips(
                 brand=claim.brand,
@@ -1090,11 +1375,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 candidate_id=claim.candidate_id,
                 raw_clips=[],
             )
+            sku_clean_sec = 0.0
             for oc in official_clips:
                 if oc.video_id not in clip_summaries:
                     local_p = self._ensure_source_video(oc.video_id, oc.url)
                     if local_p:
                         clip_summaries[oc.video_id] = self._scan_video_faceless(oc.video_id, local_p)
+                if oc.video_id in clip_summaries:
+                    sku_clean_sec += self._estimate_clean_footage_sec(clip_summaries[oc.video_id])
+
+            # If a single-SKU video pool has < 55s of clean footage, auto-discover supplemental official videos
+            target_min_clean = 58.0 if len(script.verified_factual_claims) == 1 else 32.0
+            if sku_clean_sec < target_min_clean:
+                extra_summaries = self._discover_supplemental_sku_videos(
+                    brand=claim.brand,
+                    model_code=claim.model_code,
+                    candidate_id=claim.candidate_id,
+                    existing_ids=set(clip_summaries.keys()),
+                    needed_sec=target_min_clean - sku_clean_sec,
+                )
+                for es in extra_summaries:
+                    clip_summaries[es.video_id] = es
 
         # 2. Check beat clips (passing through OfficialBrandVideoGate)
         for b in script.beats:
@@ -1112,12 +1413,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     raw_clips=[b.source_youtube_clip],
                 )
                 for vc in verified_list:
-                    b.source_youtube_clip = vc
                     if vc.video_id not in clip_summaries:
                         local_p = self._ensure_source_video(vc.video_id, vc.url)
                         if local_p:
                             clip_summaries[vc.video_id] = self._scan_video_faceless(vc.video_id, local_p)
-                    break
+                if verified_list:
+                    b.source_youtube_clip = verified_list[0]
 
         return clip_summaries
 
@@ -1141,10 +1442,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"No verified official brand videos available for script {script.script_id}"
             )
         summary_list = list(clip_summaries.values())
-        fallback_summary = summary_list[0]
 
-        # Map each candidate_id to its official video summary when possible
-        cand_to_summary: Dict[str, VideoScanSummary] = {}
+        # Map each candidate_id to its FULL multi-video pool (never break after the 1st video!)
+        cand_to_summaries: Dict[str, List[VideoScanSummary]] = {}
         for claim in script.verified_factual_claims:
             off_clips = self.brand_gate.filter_and_resolve_official_clips(
                 brand=claim.brand,
@@ -1152,24 +1452,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 candidate_id=claim.candidate_id,
                 raw_clips=[],
             )
+            pool: List[VideoScanSummary] = []
             for oc in off_clips:
-                if oc.video_id in clip_summaries:
-                    cand_to_summary[claim.candidate_id] = clip_summaries[oc.video_id]
-                    break
+                if oc.video_id in clip_summaries and clip_summaries[oc.video_id] not in pool:
+                    pool.append(clip_summaries[oc.video_id])
+            if pool:
+                cand_to_summaries[claim.candidate_id] = pool
 
         # 2. Split every beat into short aligned clauses & synthesize voiceover with 1 locked voice
-        clause_specs: List[Tuple[AuditedBeatSegment, int, str, str, VideoScanSummary]] = []
+        clause_specs: List[Tuple[AuditedBeatSegment, int, str, str, List[VideoScanSummary]]] = []
         clause_counter = 0
         for b in sorted(script.beats, key=lambda x: x.beat_index):
-            summary = cand_to_summary.get(b.target_candidate_id)
-            if summary is None and b.source_youtube_clip and b.source_youtube_clip.video_id in clip_summaries:
-                summary = clip_summaries[b.source_youtube_clip.video_id]
-            if summary is None:
-                summary = summary_list[(b.beat_index - 1) % len(summary_list)]
+            pool = cand_to_summaries.get(b.target_candidate_id) or []
+            if not pool and b.source_youtube_clip and b.source_youtube_clip.video_id in clip_summaries:
+                pool = [clip_summaries[b.source_youtube_clip.video_id]]
+            if not pool:
+                pool = summary_list
             pairs = _split_aligned_clauses(b.tts_voiceover_vi, b.subtitle_text_vi)
             for tts_part, sub_part in pairs:
                 clause_counter += 1
-                clause_specs.append((b, clause_counter, tts_part, sub_part, summary))
+                clause_specs.append((b, clause_counter, tts_part, sub_part, pool))
 
         voice_candidates = _choose_voice_for_video(voices_used_today, preferred_voice=preferred_voice)
         sem = asyncio.Semaphore(1)
@@ -1217,7 +1519,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"Failed to synthesize locked single-voice track for {script.script_id}"
             )
 
-        # 3. Pick non-overlapping clean official video sub-shots & render each Layout B1 slice
+        # 2b. YouTube Shorts / Reels Duration Guard: if total voiceover exceeds 55.5s, gently scale
+        # all clause WAVs proportionally so total duration lands at ~52.5s (strictly < 58.0s limit)
+        # BEFORE computing subtitle timestamps, beat spans, or cutting video slices.
+        raw_total_vo_sec = sum(d for d, _ in tts_map.values())
+        if raw_total_vo_sec > 55.5:
+            speed_factor = min(1.25, max(1.03, raw_total_vo_sec / 52.5))
+            print(
+                f"[M4.3] Normalizing voiceover duration {raw_total_vo_sec:.1f}s -> ~{raw_total_vo_sec/speed_factor:.1f}s "
+                f"(atempo={speed_factor:.3f}) to fit YouTube Shorts < 60s ceiling.",
+                flush=True,
+            )
+            for c_idx, (_, wav_p) in list(tts_map.items()):
+                tmp_scaled = wav_p.with_suffix(".scaled.wav")
+                tmp_scaled.unlink(missing_ok=True)
+                _run_cmd(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(wav_p),
+                        "-af",
+                        f"atempo={speed_factor:.4f}",
+                        "-ar",
+                        "44100",
+                        "-ac",
+                        "2",
+                        str(tmp_scaled),
+                    ]
+                )
+                tmp_scaled.replace(wav_p)
+                tts_map[c_idx] = (_get_audio_duration(wav_p), wav_p)
+
+        # 3. Pick non-overlapping clean official video sub-shots across the SKU's Multi-Video Pool
         used_windows: Dict[str, List[Tuple[float, float]]] = {}
         all_wavs: List[Path] = []
         all_vids: List[Path] = []
@@ -1226,7 +1560,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         sub_shots: List[SubShotClauseItem] = []
 
         cursor_sec = 0.0
-        for b, c_idx, tts_part, sub_part, summary in clause_specs:
+        for b, c_idx, tts_part, sub_part, pool in clause_specs:
             dur, wav_p = tts_map[c_idx]
             all_wavs.append(wav_p)
 
@@ -1235,12 +1569,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 # Anti-Content-ID Visual Temporal Guard: split clauses > 3.6s into 2 distinct visual sub-cuts
                 d1 = round(dur * 0.5, 2)
                 d2 = round(dur - d1, 2)
-                st1, et1, ff1, sh1 = self._pick_faceless_window(summary, d1, used_windows)
-                st2, et2, ff2, sh2 = self._pick_faceless_window(summary, d2, used_windows)
+                sum1, st1, et1, ff1, sh1 = self._pick_faceless_window_from_pool(
+                    pool, d1, used_windows, rotation_idx=c_idx * 2
+                )
+                sum2, st2, et2, ff2, sh2 = self._pick_faceless_window_from_pool(
+                    pool, d2, used_windows, rotation_idx=c_idx * 2 + 1
+                )
                 p1 = seg_dir / f"v_{c_idx:02d}a_B1_{locked_voice}.mp4"
                 p2 = seg_dir / f"v_{c_idx:02d}b_B1_{locked_voice}.mp4"
-                self._render_segment_layout_b1(summary, st1, et1, d1, p1, layout_mode=layout_mode)
-                self._render_segment_layout_b1(summary, st2, et2, d2, p2, layout_mode=layout_mode)
+                self._render_segment_layout_b1(sum1, st1, et1, d1, p1, layout_mode=layout_mode)
+                self._render_segment_layout_b1(sum2, st2, et2, d2, p2, layout_mode=layout_mode)
                 if not (vid_slice_path.exists() and vid_slice_path.stat().st_size > 10_000):
                     pair_txt = seg_dir / f"pair_{c_idx:02d}.txt"
                     pair_txt.write_text(f"file '{p1.name}'\nfile '{p2.name}'\n", encoding="utf-8")
@@ -1254,15 +1592,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     finally:
                         pair_txt.unlink(missing_ok=True)
                         tmp_pair.unlink(missing_ok=True)
+                chosen_vid_id = sum1.video_id if sum1.video_id == sum2.video_id else f"{sum1.video_id}+{sum2.video_id}"
                 st_vid, et_vid, face_free, sharp = st1, et2, (ff1 and ff2), round((sh1 + sh2) * 0.5, 2)
             else:
-                st_vid, et_vid, face_free, sharp = self._pick_faceless_window(
-                    summary=summary,
+                chosen_sum, st_vid, et_vid, face_free, sharp = self._pick_faceless_window_from_pool(
+                    pool=pool,
                     target_dur=dur,
                     used_windows=used_windows,
+                    rotation_idx=c_idx,
                 )
+                chosen_vid_id = chosen_sum.video_id
                 self._render_segment_layout_b1(
-                    summary=summary,
+                    summary=chosen_sum,
                     start_sec=st_vid,
                     end_sec=et_vid,
                     target_dur=dur,
@@ -1284,7 +1625,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 SubShotClauseItem(
                     clause_index=c_idx,
                     beat_index=b.beat_index,
-                    source_video_id=summary.video_id,
+                    source_video_id=chosen_vid_id,
                     source_start_sec=st_vid,
                     source_end_sec=et_vid,
                     duration_sec=round(dur, 2),
@@ -1507,7 +1848,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             render_finished_dt + dt.timedelta(seconds=MIN_RENDER_COOLDOWN_SECONDS)
         ).isoformat(timespec="seconds")
 
-        unique_vids = list(dict.fromkeys(s.source_video_id for s in sub_shots))
+        unique_vids = list(
+            dict.fromkeys(
+                vid_part
+                for s in sub_shots
+                for vid_part in s.source_video_id.split("+")
+                if vid_part
+            )
+        )
         social_pack = self._build_social_pack(script, m3_data)
 
         print(
