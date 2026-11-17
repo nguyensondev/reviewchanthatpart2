@@ -238,6 +238,62 @@ fi
 
 echo "[OK] Da kich hoat LaunchAgent: $PLIST_PATH"
 
+# 6b. Install & Activate 24/7 Telegram Health Bot Menu Listener (KeepAlive, zero extra deps)
+TG_PLIST_LABEL="com.congnghe.telegrambot"
+TG_PLIST_PATH="$LAUNCH_AGENTS_DIR/${TG_PLIST_LABEL}.plist"
+cat > "$TG_PLIST_PATH" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${TG_PLIST_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${VENV_PY}</string>
+        <string>-m</string>
+        <string>pipeline.telegram_health_bot</string>
+        <string>--daemon</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${PROJECT_DIR}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${BIN_DIR}:/usr/local/bin:/opt/homebrew/bin:${HOME}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>SSL_CERT_FILE</key>
+        <string>${CA_BUNDLE}</string>
+        <key>REQUESTS_CA_BUNDLE</key>
+        <string>${CA_BUNDLE}</string>
+        <key>CURL_CA_BUNDLE</key>
+        <string>${CA_BUNDLE}</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${LOG_DIR}/telegram_bot_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_DIR}/telegram_bot_stderr.log</string>
+</dict>
+</plist>
+EOF
+
+plutil -lint "$TG_PLIST_PATH"
+launchctl bootout "gui/${USER_UID}" "$TG_PLIST_PATH" >/dev/null 2>&1 || true
+launchctl unload -w "$TG_PLIST_PATH" >/dev/null 2>&1 || true
+if ! launchctl bootstrap "gui/${USER_UID}" "$TG_PLIST_PATH" >/dev/null 2>&1; then
+    launchctl load -w "$TG_PLIST_PATH"
+fi
+echo "[OK] Da kich hoat Telegram Health Bot LaunchAgent: $TG_PLIST_PATH"
+
 # 7. Send Telegram confirmation from this machine
 "$VENV_PY" -c '
 import platform, sys
