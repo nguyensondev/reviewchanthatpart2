@@ -26,6 +26,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from pipeline.brand_video_gate import OfficialBrandVideoGate
 from pipeline.core_resilience import atomic_write_text
 from pipeline.llm_client import FreeTierGeminiClient
 from pipeline.schemas_m0 import AffiliateListingMatch, DomainId, YouTubeEvidenceClip
@@ -101,18 +102,27 @@ class M2ScriptGeneratorEngine:
         m1_data: M1QualifiedSKUsOutput,
         m1_5_data: Optional[M15ComboCuratorOutput] = None,
     ) -> str:
+        brand_gate = OfficialBrandVideoGate()
         category_blocks: List[str] = []
         for idx, cat in enumerate(m1_data.qualified_categories, start=1):
             w = cat.primary_winner
             ru = cat.runner_up
             v = cat.head_to_head_verdict
 
+            clean_footage_sec = brand_gate.estimate_sku_clean_footage_sec(
+                w.brand, w.model_code, w.candidate_id, w.youtube_evidence
+            )
+            if clean_footage_sec < 38.0:
+                word_budget_str = "125 – 145 từ (mỗi beat 24 – 30 từ, tương ứng ~33s – 38s để vừa khít thời lượng video gốc chính hãng mà KHÔNG BAO GIỜ phải lặp cảnh)"
+            else:
+                word_budget_str = "155 – 185 từ (mỗi beat 30 – 38 từ, tương ứng ~41s – 48s)"
+
             runner_line = (
-                f"  - Á QUÂN (`{ru.candidate_id}`): {ru.brand} ({ru.model_code or 'N/A'}) — {ru.product_name_vi} | "
+                f"  - Mẫu so sánh trực tiếp (`{ru.candidate_id}`): {ru.brand} ({ru.model_code or 'N/A'}) — {ru.product_name_vi} | "
                 f"Giá ~{ru.estimated_market_price_vnd:,}đ | Điểm {ru.score_breakdown.total_score_100}/100 | "
                 f"Nhược điểm: {ru.honest_caveat_vi}"
                 if ru
-                else "  - Á QUÂN: (Không có)"
+                else "  - Mẫu so sánh trực tiếp: (Không có)"
             )
             foil_lines = "; ".join(
                 f"`{f.candidate_id}` ({f.brand}, ~{f.estimated_market_price_vnd:,}đ, lý do loại: {f.rejection_reason_vi})"
@@ -126,18 +136,19 @@ class M2ScriptGeneratorEngine:
 === NHÓM CÔNG NĂNG {idx}: `{cat.category_id}` — {cat.category_name_vi} ===
 - Chủ đề gốc (Domain): `{cat.domain}`
 - Vấn đề giải quyết: {cat.problem_solved_vi}
-- QUÁN QUÂN (`{w.candidate_id}`): {w.brand} | Model: {w.model_code or 'N/A'} | Tên: {w.product_name_vi}
+- SẢN PHẨM CHÍNH (`{w.candidate_id}`): {w.brand} | Model: {w.model_code or 'N/A'} | Tên: {w.product_name_vi}
   + Giá thị trường chuẩn: {w.estimated_market_price_vnd:,}đ ({w.price_vs_median_ratio}x trung vị) | Điểm M1: {w.score_breakdown.total_score_100}/100
+  + Thời lượng cảnh quay sạch chính hãng hiện có: ~{clean_footage_sec:.0f}s -> NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU: **{word_budget_str}**
   + Thông số chuẩn: {specs_str}
   + Ưu điểm nổi bật: {"; ".join(w.highlight_pros_vi)}
   + Nhược điểm thực tế BẮT BUỘC PHẢI NÓI (`{w.caveat_severity}`): {w.honest_caveat_vi}
 {runner_line}
-- MẪU ĐỐI CHỨNG NÊN TRÁNH (`rejected_foils`): {foil_lines}
-- BIÊN BẢN ĐỐI ĐẦU TỪ M1:
-  + Tại sao chọn Quán quân: {v.why_winner_chosen_vi}
-  + Tại sao thắng Á quân: {v.why_winner_beats_runner_up_vi}
-  + Tại sao tránh hàng lỗi/OEM: {v.why_avoid_rejected_foils_vi}
-  + Cách nói nhược điểm trung thực: {v.honest_caveat_framing_vi}
+- HÀNG GIÁ RẺ / LỖI NÊN TRÁNH (`rejected_foils`): {foil_lines}
+- GHI CHÚ THẨM ĐỊNH TỪ M1:
+  + Điểm ăn tiền của sản phẩm chính: {v.why_winner_chosen_vi}
+  + Khác biệt thực tế so với mẫu phổ thông: {v.why_winner_beats_runner_up_vi}
+  + Bẫy hàng rẻ/OEM: {v.why_avoid_rejected_foils_vi}
+  + Góc nhìn công tâm về điểm trừ: {v.honest_caveat_framing_vi}
 """.strip()
             )
 
@@ -162,11 +173,10 @@ class M2ScriptGeneratorEngine:
                 f"1. Module độc lập M1.5 đã duyệt bộ Combo tự nhiên (`COMBO_APPROVED`) gồm các SKU `{[m.candidate_id for m in cb.members]}`.\n"
                 "   -> BẮT BUỘC đặt `multi_category_synergy_type = \"COMPLEMENTARY_WORKFLOW\"`.\n"
                 f"2. SỐ LƯỢNG KỊCH BẢN PHẢI TẠO TRONG `scripts`: ĐÚNG {num_cats + 1} KỊCH BẢN gồm:\n"
-                f"   - {num_cats} kịch bản `SINGLE_SKU_DEEP_DIVE` (mỗi Quán quân 1 kịch bản riêng).\n"
+                f"   - {num_cats} kịch bản `SINGLE_SKU_DEEP_DIVE` (mỗi sản phẩm chính 1 kịch bản riêng).\n"
                 f"   - 1 kịch bản `COMBO_WORKFLOW_SYNERGY` ghép đúng các SKU `{[m.candidate_id for m in cb.members]}` theo sát tình huống `joint_workflow_scenario_vi` của M1.5 ở trên."
             )
         elif m1_5_data and m1_5_data.status == "BYPASS":
-            # Check if categories are a size/tier pair of the same product family
             cat_names_norm = " ".join(c.category_id for c in m1_data.qualified_categories).lower()
             is_size_pair = num_cats >= 2 and ("chopper" in cat_names_norm and len(set(c.domain for c in m1_data.qualified_categories)) == 1)
             if is_size_pair:
@@ -179,7 +189,7 @@ class M2ScriptGeneratorEngine:
                 multi_rule = (
                     f"1. Module độc lập M1.5 trả về `status = \"BYPASS\"` ({m1_5_data.bypass_reason_vi}).\n"
                     "   -> TUYỆT ĐỐI KHÔNG ÉP VIẾT KỊCH BẢN COMBO! Hãy đặt `multi_category_synergy_type = \"SINGLE_CATEGORY_ONLY\"` "
-                    f"và CHỈ TẠO ĐÚNG {num_cats} kịch bản `SINGLE_SKU_DEEP_DIVE` (mỗi Quán quân 1 kịch bản riêng, 0 kịch bản combo)."
+                    f"và CHỈ TẠO ĐÚNG {num_cats} kịch bản `SINGLE_SKU_DEEP_DIVE` (mỗi sản phẩm chính 1 kịch bản riêng, 0 kịch bản combo)."
                 )
         elif num_cats == 1:
             multi_rule = (
@@ -188,14 +198,13 @@ class M2ScriptGeneratorEngine:
         else:
             multi_rule = (
                 "1. Có từ 2 nhóm công năng trở lên -> PHÂN LOẠI MỐI QUAN HỆ TRƯỚC:\n"
-                "   - Nếu 2 Quán quân thực chất là CÙNG MỘT DÒNG CÔNG DỤNG nhưng khác kích cỡ/dung tích/tầm giá (VD: cối 180ml ~89k vs cối 900ml ~195k) "
-                "-> KHÔNG ĐƯỢC ÉP THÀNH COMBO MUA CẢ HAI! Hãy chọn `multi_category_synergy_type = \"SIZE_OR_TIER_PAIR\"` và tạo kịch bản ghép dạng **`DUAL_TIER_COMPARISON`** "
-                "(đặt lên bàn cân để người xem tự chọn đúng 1 mẫu hợp nhu cầu gia đình).\n"
-                "   - Nếu 2 Quán quân thuộc 2 CÔNG ĐOẠN KHÁC NHAU bổ trợ liền mạch trong 1 quy trình (VD: Cối xay tỏi + Bình xịt dầu) "
+                "   - Nếu 2 sản phẩm chính thực chất là CÙNG MỘT DÒNG CÔNG DỤNG nhưng khác kích cỡ/dung tích/tầm giá "
+                "-> KHÔNG ĐƯỢC ÉP THÀNH COMBO MUA CẢ HAI! Hãy chọn `multi_category_synergy_type = \"SIZE_OR_TIER_PAIR\"` và tạo kịch bản ghép dạng **`DUAL_TIER_COMPARISON`**.\n"
+                "   - Nếu 2 sản phẩm chính thuộc 2 CÔNG ĐOẠN KHÁC NHAU bổ trợ liền mạch trong 1 quy trình "
                 "-> chọn `multi_category_synergy_type = \"COMPLEMENTARY_WORKFLOW\"` và tạo kịch bản ghép dạng **`COMBO_WORKFLOW_SYNERGY`**.\n"
                 f"2. SỐ LƯỢNG KỊCH BẢN PHẢI TẠO TRONG `scripts`: ĐÚNG {num_cats + 1} KỊCH BẢN gồm:\n"
-                f"   - {num_cats} kịch bản `SINGLE_SKU_DEEP_DIVE` (mỗi Quán quân 1 kịch bản riêng).\n"
-                "   - 1 kịch bản ghép đa SKU (`DUAL_TIER_COMPARISON` hoặc `COMBO_WORKFLOW_SYNERGY` tương ứng với phân loại ở trên)."
+                f"   - {num_cats} kịch bản `SINGLE_SKU_DEEP_DIVE`.\n"
+                "   - 1 kịch bản ghép đa SKU (`DUAL_TIER_COMPARISON` hoặc `COMBO_WORKFLOW_SYNERGY`)."
             )
 
         return f"""
@@ -203,7 +212,7 @@ Bối cảnh ngách từ M1:
 - Lĩnh vực: `{m1_data.domain}` — {m1_data.sub_niche_name_vi}
 - Nỗi đau người dùng: {m1_data.problem_context_vi}
 
-Dữ liệu các Quán quân, Á quân và Đối chứng đã được M1 thẩm định:
+Dữ liệu các sản phẩm đã được M1 thẩm định:
 
 {chr(10).join(category_blocks)}
 {combo_section_str}
@@ -212,49 +221,33 @@ YÊU CẦU TẠO KỊCH BẢN (`LLMM2BatchGenerationResponse`):
 - MỌI KỊCH BẢN BẮT BUỘC ĐIỀN `hook_title_short_vi` (tiêu đề mở bài hiển thị 2s đầu video, NGẮN GỌN TỐI ĐA 30 KÝ TỰ, có dấu tiếng Việt chuẩn, không dài dòng che nội dung).
 
 PHÂN BỔ GÓC KỂ CHUYỆN KHÁC BIỆT (`narrative_angle`) & CHỦ ĐỀ (`domain`, `category_id`):
-Mỗi kịch bản trong `scripts` BẮT BUỘC phải điền đúng `domain` (`TECH_DESK` hoặc `KITCHEN_TECH`), đúng `category_id` của Quán quân tương ứng, và PHẢI gán MỘT `narrative_angle` KHÁC NHAU (KHÔNG ĐƯỢC HAI KỊCH BẢN TRÙNG `narrative_angle`):
-1. `PAIN_POINT_REALITY_CHECK` (Bóc tách nỗi đau thực tế & kiểm chứng thông số vật lý): Mở bài bằng tình huống gây ức chế đời thường -> đối chiếu cơ chế kỹ thuật giải quyết -> điểm trừ thật -> chốt.
-2. `MYTH_VS_FACT_TEARDOWN` (Giải mã hiểu lầm phổ biến / Tránh mua nhầm): Mở bài bằng hiểu lầm nhiều người mắc khi mua dòng sản phẩm này -> lật ngược bằng thông số thực tế -> cảnh báo giới hạn -> chốt.
-3. `TIME_AND_EFFORT_MATH` (Bài toán hiệu suất & chi phí sử dụng mỗi ngày): Mở bài bằng con số tính toán thời gian/công sức tiết kiệm hoặc chi phí/lần dùng -> phân tích thiết kế cốt lõi -> điểm trừ -> chốt.
-4. `DECISION_GUIDE_BY_USER_TYPE` (Phân loại người dùng: Ai nên mua mã nào / khi nào không nên mua): Phù hợp cho `DUAL_TIER_COMPARISON` — mở bài bằng câu hỏi chọn phân khúc theo nhu cầu thực -> đặt 2 SKU lên bàn cân thông số -> chỉ rõ điểm đánh đổi -> chốt.
-5. `WORKFLOW_UPGRADE_JOURNEY` (Nâng cấp quy trình thao tác liên hoàn): Phù hợp cho `COMBO_WORKFLOW_SYNERGY` — ghép chuỗi thao tác mượt mà giữa các món trong 1 kịch bản.
+Mỗi kịch bản trong `scripts` BẮT BUỘC phải điền đúng `domain` (`TECH_DESK` hoặc `KITCHEN_TECH`), đúng `category_id` của sản phẩm tương ứng, và PHẢI gán MỘT `narrative_angle` KHÁC NHAU (KHÔNG ĐƯỢC HAI KỊCH BẢN TRÙNG `narrative_angle`):
+1. `PAIN_POINT_REALITY_CHECK` (Trải nghiệm thực tế giải quyết nỗi đau đời thường)
+2. `MYTH_VS_FACT_TEARDOWN` (Phá bỏ lầm tưởng phổ biến bằng trải nghiệm thật)
+3. `TIME_AND_EFFORT_MATH` (Giá trị sử dụng thực tế mỗi ngày so với chi phí)
+4. `DECISION_GUIDE_BY_USER_TYPE` (Ai thực sự cần món này và ai không nên mua)
+5. `WORKFLOW_UPGRADE_JOURNEY` (Nâng cấp trải nghiệm góc làm việc / căn bếp liền mạch)
 
-QUY TẮC CẤM LẶP MỞ BÀI & CẤM CÔNG THỨC RẬP KHUÔN:
-- Các kịch bản trong cùng đợt chạy TUYỆT ĐỐI KHÔNG được mở đầu giống nhau, không dùng chung một kiểu câu hỏi tu từ hay cụm chữ mở bài na ná nhau, và phải đổi hẳn nhịp điệu/giọng điệu dẫn dắt theo đúng `narrative_angle` đã chọn.
-
-QUY CHUẨN CHIỀU SÂU NỘI DUNG, LỜI DẪN CHUYỂN Ý & CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1` ĐẾN `5`):
-- ĐỘ DÀI LINH HOẠT XỨNG TẦM VỚI GIÁ TRỊ CỦA SKU (KHÔNG VIẾT CỘC LỐC SƠ SÀI):
-  + Video Shorts/Reels có trần 60 giây; vùng thời lượng vàng giữ chân người xem tốt nhất là **38 giây – 53 giây** (tương ứng tổng cộng **140 – 195 từ tiếng Việt** cho cả 5 phân cảnh, trung bình **28 – 39 từ mỗi beat**).
-  + Tùy lượng thông tin và ưu điểm đắt giá của từng SKU trong hồ sơ M1 mà co giãn tự nhiên: SKU nhiều công nghệ/điểm sáng cần phân tích sâu thì viết đủ **165 – 195 từ**; SKU đơn giản hơn thì viết gọn **140 – 165 từ**, nhưng TUYỆT ĐỐI KHÔNG viết sơ sài dưới 135 từ và KHÔNG bỏ sót các `Ưu điểm nổi bật` của Quán quân!
-- NGHỆ THUẬT DẪN CHUYỆN & NỐI MẠCH (`Storytelling & Smooth Transitions`):
-  + CẤM đọc tên sản phẩm dài lê thê kiểu hóa đơn (VD cấm viết: *"Hãy chọn đúng Đèn treo màn hình chống chói bảo vệ mắt Baseus i-wok2 Series chính hãng Baseus"* -> Hãy dẫn tự nhiên như reviewer thật: *"Để trị dứt điểm cảnh chói màn hình đó, mình chuyển qua chiếc đèn treo màn hình Baseus i-wok2 này..."*).
-  + BẮT BUỘC có **lời dẫn chuyển ý (Transition Bridge)** ở đầu các Beat 2, 3, 4, 5 để 5 phân cảnh chảy liền thành 1 câu chuyện cuốn hút (VD: *"Khác biệt ăn tiền nhất nằm ở..."*, *"Đặt cạnh các mẫu cùng tầm giá mới thấy..."*, *"Tuy nhiên, có một điểm thực tế mình phải báo trước để bạn cân nhắc..."*, *"Tổng kết lại với mức giá khoảng..."*).
-  + Biến mọi **Thông số kỹ thuật khô khan** thành **Lợi ích & Cảm giác sử dụng thực tế ngoài đời** (giải thích rõ cơ chế đó giúp người dùng sướng hơn, nhàn hơn hay bền hơn thế nào).
-- CẤU TRÚC CHI TIẾT 5 PHÂN CẢNH:
-  + Với `SINGLE_SKU_DEEP_DIVE` (tổng **145 – 195 từ**, mỗi beat **28 – 40 từ**, câu văn trọn vẹn tuyệt đối không cụt ý):
-    * Beat 1 (`HOOK_FOIL_WARNING`): Mở màn bằng tình huống thực tế gây ức chế mà người xem thấy mình trong đó + bóc trần điểm yếu của hàng OEM/giá rẻ trong `rejected_foils` (nêu rõ mức giá hàng rẻ từ dữ liệu M1).
-    * Beat 2 (`WINNER_REVEAL_SPECS`): Lời dẫn chuyển sang giải pháp Quán quân (nêu chuẩn thương hiệu + `model_code`) + phân tích chất liệu/thiết kế/thông số cốt lõi mang lại trải nghiệm thực tế gì.
-    * Beat 3 (`HEAD_TO_HEAD_PROOF`): Đào sâu các điểm sáng (`highlight_pros_vi`) và lý do thắng Á quân (`why_winner_beats_runner_up_vi`) — làm nổi bật vì sao SKU này đáng đồng tiền bát gạo.
-    * Beat 4 (`HONEST_CAVEAT`): Lời dẫn chuyển ý công tâm + nói thẳng nhược điểm thực tế từ `honest_caveat_vi`, đặt trong ngữ cảnh khách quan (ai cần lưu ý, vì sao điểm trừ này vẫn chấp nhận được so với ưu điểm).
-    * Beat 5 (`VALUE_VERDICT_CTA`): Chốt rõ mẫu này sinh ra cho ai, nêu mức giá chuẩn (~`estimated_market_price_vnd`) và lời mời tự nhiên bấm xem gian hàng chính hãng ở giỏ hàng/bình luận.
-  + Với `DUAL_TIER_COMPARISON` (tổng **155 – 200 từ**, mỗi beat **30 – 41 từ**):
-    * Beat 1 (`HOOK_FOIL_WARNING`): Tình huống phân vân chọn kích cỡ/phân khúc + cảnh báo bẫy hàng OEM rẻ.
-    * Beat 2 (`DUAL_TIER_BREAKDOWN`): Đặt 2 Quán quân lên bàn cân (nêu chuẩn model, thông số cốt lõi và giá của CẢ HAI).
-    * Beat 3 (`HEAD_TO_HEAD_PROOF`): Mổ xẻ trải nghiệm thực tế: nhu cầu nào nên lấy bản nhỏ, nhu cầu nào bắt buộc phải lên bản lớn.
-    * Beat 4 (`HONEST_CAVEAT`): Nêu công tâm điểm đánh đổi thật của CẢ HAI mẫu.
-    * Beat 5 (`VALUE_VERDICT_CTA`): Chốt công thức chọn nhanh trong 5 giây + CTA xem link chính hãng bên dưới.
-  + Với `COMBO_WORKFLOW_SYNERGY` (tổng **155 – 200 từ**, mỗi beat **30 – 41 từ**):
-    * Beat 1 (`HOOK_FOIL_WARNING`): Cảnh bất tiện khi góc làm việc/căn bếp thiếu sự phối hợp đồng bộ + cảnh báo đồ OEM lẻ tẻ.
-    * Beat 2 (`COMBO_STEP_1`): Lời dẫn vào món thứ nhất trong Combo — thông số & điểm sáng giải quyết nửa đầu bài toán.
-    * Beat 3 (`COMBO_STEP_2_TRANSITION`): Cầu nối mượt mà sang món thứ hai — cách 2 món ghép lại tạo thành quy trình hoàn hảo.
-    * Beat 4 (`HONEST_CAVEAT`): Nói thẳng điểm cần lưu ý thực tế của bộ đôi này một cách khách quan.
-    * Beat 5 (`VALUE_VERDICT_CTA`): Tổng kết giá trị thực tế của cả combo + CTA tham khảo từng món chính hãng ở bình luận/giỏ hàng.
+NGUYÊN TẮC VÀNG: VĂN NÓI ĐỜI THƯỜNG CỦA NGƯỜI THẬT — CẤM TUYỆT ĐỐI VĂN MẪU AI / BROCHURE:
+1. **CẤM TUYỆT ĐỐI các cụm từ sáo rỗng mang mùi AI hoặc thuật ngữ nội bộ**:
+   - CẤM viết trong lời thoại: *"mẫu Quán quân"*, *"mẫu Á quân"*, *"mẫu đối chứng"*, *"Sản phẩm hoàn thiện chắc chắn từ..."*, *"Giải pháp chuẩn chỉnh nhất chính là..."*, *"Hãy đầu tư nghiêm túc vào..."*, *"Mã này trang bị..."*, *"sở hữu tính năng"*, *"mang lại trải nghiệm tuyệt vời"*, *"Tổng kết lại, với khoảng..."*.
+   - Hãy viết đúng như một người bạn / reviewer có nghề đang trò chuyện trực tiếp, tự nhiên, gần gũi (VD: *"Cầm chiếc ... này trên tay mới hiểu vì sao..."*, *"Điểm mình ưng nhất ở thiết kế này là..."*, *"Thử đặt cạnh mấy dòng ... rẻ tiền mới thấy khác hẳn..."*, *"Có một điểm thực tế mình phải dặn trước..."*, *"Tính ra ở tầm giá khoảng ... thì..."*).
+2. **MỞ BÀI (Beat 1) CUỐN HÚT, ĐA DẠNG & KHỚP HÌNH ẢNH TRÊN MÀN HÌNH**:
+   - Các kịch bản trong cùng đợt chạy phải có cách vào đề hoàn toàn khác nhau: có thể mở bằng một cảnh sinh hoạt rất đời (ngồi gõ phím 11 giờ đêm tắt đèn phòng, mỏi nhừ cổ tay sau ngày dài làm việc, hay làm bánh đong lệch vài gram bột), hoặc một trải nghiệm đối chứng thực tế.
+   - Không mở bài kiểu công thức cứng nhắc lặp đi lặp lại. Trong Beat 1, lồng ghép tự nhiên bẫy hàng rẻ/OEM (`rejected_foils`) và dẫn thẳng vào nhân vật chính để hình ảnh sản phẩm trên màn hình khớp nhịp với lời kể.
+3. **ĐỘ DÀI TỰ NHIÊN THEO ĐÚNG `NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU` CỦA TỪNG SKU**:
+   - Tuân thủ sát `NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU` đã tính sẵn ở từng nhóm công năng bên trên (`125 – 145 từ` với SKU có 1 video ngắn ~35s; `155 – 185 từ` với SKU hoặc Combo có nhiều video ~45-50s) để **video tuyệt đối không bao giờ phải lặp cảnh chỉ vì cố kéo theo kịch bản dài**, đồng thời vẫn đủ chiều sâu làm bật trọn vẹn các điểm sáng của sản phẩm.
+4. **CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1..5`) MƯỢT MÀ & KHỚP CẢNH QUAY (`visual_instruction_vi`)**:
+   - Beat 1 (`HOOK_FOIL_WARNING`): Mở đầu tự nhiên, chạm đúng tình huống đời thực + lướt nhanh điểm yếu của hàng OEM giá rẻ (nêu đúng mức giá từ M1) để dẫn vào sản phẩm chính.
+   - Beat 2 (`WINNER_REVEAL_SPECS` / `COMBO_STEP_1`): Lời dẫn tự nhiên giới thiệu thương hiệu + `model_code` + phân tích thiết kế/chất liệu/cấu tạo cốt lõi giúp ích gì ngoài đời thực (khớp cảnh quay cận cảnh thiết kế/vật liệu).
+   - Beat 3 (`HEAD_TO_HEAD_PROOF` / `COMBO_STEP_2_TRANSITION`): Đào sâu trải nghiệm sử dụng thực tế các điểm sáng đắt giá nhất (`highlight_pros_vi`) và sự vượt trội so với dòng phổ thông (khớp cảnh quay thao tác sử dụng thực tế).
+   - Beat 4 (`HONEST_CAVEAT`): Chuyển ý thẳng thắn, nói rõ nhược điểm thực tế từ `honest_caveat_vi` dưới góc nhìn công bằng (ai sẽ thấy bất tiện, ai dùng vẫn rất ổn — khớp cảnh quay chi tiết bộ phận liên quan).
+   - Beat 5 (`VALUE_VERDICT_CTA`): Chốt tự nhiên xem món này hợp với ai ở mức giá ~`estimated_market_price_vnd` và nhắn nhẹ người xem tham khảo link chính hãng ở giỏ hàng/bình luận.
 
 RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
-- NGÔN NGỮ VOICEOVER & TIÊU ĐỀ: BẮT BUỘC viết bằng **tiếng Việt có dấu đầy đủ (UTF-8 chuẩn)**, đúng chính tả, văn phong nói tự nhiên mượt mà như reviewer thật (phục vụ đọc Voiceover TTS). TUYỆT ĐỐI KHÔNG viết tiếng Việt không dấu hoặc sai dấu chính tả.
-- `target_candidate_id` ở mỗi beat phải dùng đúng chuỗi `candidate_id` có thật trong dữ liệu M1 (VD: `locknlock_cks321`).
-- `primary_sku_ids`, `runner_up_sku_ids_referenced`, `foil_sku_ids_referenced` phải dùng đúng các `candidate_id` từ M1.
-- `on_screen_text_vi`: Ngắn gọn, nổi bật, tiếng Việt có dấu, TUYỆT ĐỐI KHÔNG QUÁ 8 TỪ.
+- NGÔN NGỮ VOICEOVER & TIÊU ĐỀ: BẮT BUỘC viết bằng **tiếng Việt có dấu đầy đủ (UTF-8 chuẩn)**, đúng chính tả, câu văn hoàn chỉnh không cụt ý.
+- `target_candidate_id` ở mỗi beat phải dùng đúng chuỗi `candidate_id` có thật trong dữ liệu M1.
+- `on_screen_text_vi`: Ngắn gọn, súc tích, tiếng Việt có dấu, TUYỆT ĐỐI KHÔNG QUÁ 8 TỪ.
 - KHÔNG ĐƯỢC BỊA THÊM thông số, công suất, thời gian bảo hành hay giá bán khác với dữ liệu M1 đã cho.
 """.strip()
 

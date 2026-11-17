@@ -152,6 +152,36 @@ class OfficialBrandVideoGate:
         intervals = (self.data.get("verified_clean_shot_intervals") or {}).get(video_id) or []
         out: List[Tuple[float, float]] = []
         for pair in intervals:
-            if isinstance(pair, list) and len(pair) == 2:
+            if isinstance(pair, list) and len(pair) >= 2:
                 out.append((float(pair[0]), float(pair[1])))
         return out
+
+    def get_verified_clean_intervals_with_tags(self, video_id: str) -> List[Tuple[float, float, str]]:
+        intervals = (self.data.get("verified_clean_shot_intervals") or {}).get(video_id) or []
+        out: List[Tuple[float, float, str]] = []
+        for pair in intervals:
+            if isinstance(pair, list) and len(pair) >= 2:
+                tag = str(pair[2]) if len(pair) >= 3 else ""
+                out.append((float(pair[0]), float(pair[1]), tag))
+        return out
+
+    def estimate_sku_clean_footage_sec(
+        self,
+        brand: str,
+        model_code: Optional[str],
+        candidate_id: str,
+        raw_clips: List[YouTubeEvidenceClip],
+    ) -> float:
+        """
+        Estimate total non-overlapping clean official footage (in seconds) available for a SKU
+        so M2 can scale script word count naturally without ever forcing M4 to loop/repeat video.
+        """
+        clips = self.filter_and_resolve_official_clips(brand, model_code, candidate_id, raw_clips)
+        total_sec = 0.0
+        for c in clips:
+            ivs = self.get_verified_clean_intervals(c.video_id)
+            if ivs:
+                total_sec += sum(max(0.0, b - a) for a, b in ivs if b - a >= 1.5)
+            else:
+                total_sec += min(38.0, max(18.0, float(c.duration_sec or 45) * 0.55))
+        return round(total_sec, 1)

@@ -676,18 +676,28 @@ class M4VideoProducerEngine:
         )
         return summary
 
+    @staticmethod
+    def _norm_scene_tokens(text: str) -> set[str]:
+        import unicodedata
+
+        s = (text or "").replace("đ", "d").replace("Đ", "D")
+        nfkd = unicodedata.normalize("NFKD", s)
+        ascii_str = "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+        return {tok for tok in re.sub(r"[^a-z0-9]+", " ", ascii_str).split() if len(tok) >= 2}
+
     def _try_pick_unused_from_summary(
         self,
         summary: VideoScanSummary,
         target_dur: float,
         used_windows: Dict[str, List[Tuple[float, float]]],
         use_opencv_fallback: bool = False,
+        beat_index: int = 1,
+        query_text_vi: str = "",
     ) -> Optional[Tuple[float, float, bool, float]]:
         """
-        Try to select a 100% UNUSED (`0% overlap`) clean segment `[st, et]` from `summary`.
-        Dynamically slices long verified intervals (e.g. a 29s clean close-up interval yields
-        9 distinct sequential sub-shots without ever repeating a timestamp).
-        Returns `None` if `summary` has no unused clean footage left.
+        Select a 100% UNUSED (`0% overlap`) clean segment `[st, et]` from `summary` that best
+        matches the current script beat & clause keywords (`beat_index`, `query_text_vi`).
+        Dynamically slices long verified intervals and returns `None` if no unused footage remains.
         """
         existing = used_windows.setdefault(summary.video_id, [])
 
@@ -697,26 +707,52 @@ class M4VideoProducerEngine:
                     return True
             return False
 
-        desired_take = min(max(2.1, target_dur * 0.92), 3.6)
+        desired_take = min(max(1.55, target_dur * 0.78), 3.2)
+        query_tokens = self._norm_scene_tokens(query_text_vi)
+        beat_tag = f"beat{beat_index}"
+        tagged_intervals = self.brand_gate.get_verified_clean_intervals_with_tags(summary.video_id)
 
-        if summary.verified_clean_intervals:
-            for a, b in summary.verified_clean_intervals:
+        if tagged_intervals or summary.verified_clean_intervals:
+            raw_ivs = tagged_intervals or [
+                (a, b, "") for a, b in summary.verified_clean_intervals
+            ]
+            scored_slices: List[Tuple[float, float, float]] = []
+            for a, b, tag_str in raw_ivs:
                 iv_len = b - a
-                if iv_len < 1.6:
+                if iv_len < 1.45:
                     continue
-                # Scan along [a, b] in 0.25s steps to find the first non-overlapping sub-slice
+                tag_tokens = self._norm_scene_tokens(tag_str)
+                sem_score = 0.0
+                if beat_tag in tag_tokens:
+                    sem_score += 18.0
+                shared = query_tokens.intersection(tag_tokens)
+                sem_score += 4.5 * len(shared)
+                # Gentle chronological tie-breaker so shots flow naturally with the 5 beats
+                rel_pos = (a / max(1.0, summary.duration_sec))
+                target_rel = (beat_index - 0.5) / 5.0
+                sem_score -= abs(rel_pos - target_rel) * 3.0
+
                 cursor = a
-                while cursor + 1.6 <= b + 0.05:
+                while cursor + 1.45 <= b + 0.05:
                     avail = b - cursor
-                    take_len = min(avail, max(2.0, desired_take))
-                    if take_len < 1.6:
+                    if 3.1 <= avail <= 4.3 and desired_take <= 2.3:
+                        take_len = round((avail - 0.14) * 0.5, 2)
+                    else:
+                        take_len = min(avail, max(1.55, desired_take))
+                    if take_len < 1.45:
                         break
                     st = round(cursor, 2)
                     et = round(cursor + take_len, 2)
-                    if not _overlaps(st, et, pad=0.20):
-                        existing.append((st, et))
-                        return st, et, True, 180.0
-                    cursor = round(cursor + 0.5, 2)
+                    if not _overlaps(st, et, pad=0.10):
+                        scored_slices.append((sem_score, st, et))
+                        break
+                    cursor = round(cursor + 0.2, 2)
+
+            if scored_slices:
+                scored_slices.sort(key=lambda x: (-x[0], x[1]))
+                _, st, et = scored_slices[0]
+                existing.append((st, et))
+                return st, et, True, 180.0
 
         if not use_opencv_fallback and summary.verified_clean_intervals:
             return None
@@ -755,11 +791,13 @@ class M4VideoProducerEngine:
         target_dur: float,
         used_windows: Dict[str, List[Tuple[float, float]]],
         rotation_idx: int = 0,
+        beat_index: int = 1,
+        query_text_vi: str = "",
     ) -> Tuple[VideoScanSummary, float, float, bool, float]:
         """
-        Multi-Video Pool Zero-Repeat Selector:
-          1. Rotates across all verified videos for the SKU (`pool`) and picks a 100% unused
-             (`0% overlap`) sub-window from `verified_clean_intervals`.
+        Multi-Video Pool Zero-Repeat & Semantic Scene Selector:
+          1. Rotates across all verified official videos for the SKU (`pool`) and picks a 100% unused
+             (`0% overlap`) sub-window that best matches `beat_index` and `query_text_vi`.
           2. If verified intervals are exhausted, checks 100% unused OpenCV clean windows
              across all videos in `pool`.
           3. Emergency Least-Used Fallback: if an ultra-long script ever exhausts every unique
@@ -771,7 +809,6 @@ class M4VideoProducerEngine:
 
         n = len(pool)
         ordered_pool = [pool[(rotation_idx + i) % n] for i in range(n)]
-        # Also prioritize videos with the least used duration so far for balanced multi-video variety
         ordered_pool.sort(
             key=lambda s: sum(max(0.0, u_b - u_a) for u_a, u_b in used_windows.get(s.video_id, []))
         )
@@ -779,7 +816,12 @@ class M4VideoProducerEngine:
         # Pass 1: Strict zero-overlap from verified clean intervals across all videos in pool
         for summary in ordered_pool:
             res = self._try_pick_unused_from_summary(
-                summary, target_dur, used_windows, use_opencv_fallback=False
+                summary,
+                target_dur,
+                used_windows,
+                use_opencv_fallback=False,
+                beat_index=beat_index,
+                query_text_vi=query_text_vi,
             )
             if res is not None:
                 return summary, res[0], res[1], res[2], res[3]
@@ -787,7 +829,12 @@ class M4VideoProducerEngine:
         # Pass 2: Strict zero-overlap from OpenCV face-free & caption-free scan across all videos in pool
         for summary in ordered_pool:
             res = self._try_pick_unused_from_summary(
-                summary, target_dur, used_windows, use_opencv_fallback=True
+                summary,
+                target_dur,
+                used_windows,
+                use_opencv_fallback=True,
+                beat_index=beat_index,
+                query_text_vi=query_text_vi,
             )
             if res is not None:
                 return summary, res[0], res[1], res[2], res[3]
@@ -1495,15 +1542,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"Failed to synthesize locked single-voice track for {script.script_id}"
             )
 
-        # 2b. YouTube Shorts / Reels Duration Guard: if total voiceover exceeds 55.5s, gently scale
-        # all clause WAVs proportionally so total duration lands at ~52.5s (strictly < 58.0s limit)
-        # BEFORE computing subtitle timestamps, beat spans, or cutting video slices.
+        # 2b. Zero-Repeat Visual Capacity & YouTube Shorts (< 60s) Duration Guard:
+        # Calculate the exact non-repeating clean footage capacity (`max_non_repeating_sec`)
+        # of the script's official video pool so M4 NEVER has to repeat a video shot just to chase script length.
+        unique_clean_src_sec = sum(self._estimate_clean_footage_sec(s) for s in summary_list)
+        max_non_repeating_sec = min(55.5, max(31.0, unique_clean_src_sec * 1.28))
         raw_total_vo_sec = sum(d for d, _ in tts_map.values())
-        if raw_total_vo_sec > 55.5:
-            speed_factor = min(1.25, max(1.03, raw_total_vo_sec / 52.5))
+        if raw_total_vo_sec > max_non_repeating_sec:
+            target_vo_sec = max(30.0, max_non_repeating_sec - 0.8)
+            speed_factor = min(1.26, max(1.03, raw_total_vo_sec / target_vo_sec))
             print(
-                f"[M4.3] Normalizing voiceover duration {raw_total_vo_sec:.1f}s -> ~{raw_total_vo_sec/speed_factor:.1f}s "
-                f"(atempo={speed_factor:.3f}) to fit YouTube Shorts < 60s ceiling.",
+                f"[M4.3] Syncing voiceover {raw_total_vo_sec:.1f}s -> ~{raw_total_vo_sec/speed_factor:.1f}s "
+                f"(atempo={speed_factor:.3f}) to fit {unique_clean_src_sec:.1f}s of unique official footage (0% repeat).",
                 flush=True,
             )
             for c_idx, (_, wav_p) in list(tts_map.items()):
@@ -1539,6 +1589,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for b, c_idx, tts_part, sub_part, pool in clause_specs:
             dur, wav_p = tts_map[c_idx]
             all_wavs.append(wav_p)
+            scene_query = f"{tts_part} {b.on_screen_text_vi}"
 
             vid_slice_path = seg_dir / f"v_{c_idx:02d}_B1_{locked_voice}.mp4"
             if dur > MAX_CONTINUOUS_SHOT_SEC:
@@ -1546,10 +1597,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 d1 = round(dur * 0.5, 2)
                 d2 = round(dur - d1, 2)
                 sum1, st1, et1, ff1, sh1 = self._pick_faceless_window_from_pool(
-                    pool, d1, used_windows, rotation_idx=c_idx * 2
+                    pool,
+                    d1,
+                    used_windows,
+                    rotation_idx=c_idx * 2,
+                    beat_index=b.beat_index,
+                    query_text_vi=scene_query,
                 )
                 sum2, st2, et2, ff2, sh2 = self._pick_faceless_window_from_pool(
-                    pool, d2, used_windows, rotation_idx=c_idx * 2 + 1
+                    pool,
+                    d2,
+                    used_windows,
+                    rotation_idx=c_idx * 2 + 1,
+                    beat_index=b.beat_index,
+                    query_text_vi=scene_query,
                 )
                 p1 = seg_dir / f"v_{c_idx:02d}a_B1_{locked_voice}.mp4"
                 p2 = seg_dir / f"v_{c_idx:02d}b_B1_{locked_voice}.mp4"
@@ -1576,6 +1637,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     target_dur=dur,
                     used_windows=used_windows,
                     rotation_idx=c_idx,
+                    beat_index=b.beat_index,
+                    query_text_vi=scene_query,
                 )
                 chosen_vid_id = chosen_sum.video_id
                 self._render_segment_layout_b1(

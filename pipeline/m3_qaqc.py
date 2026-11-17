@@ -255,17 +255,17 @@ class M3QAQCEngine:
                 )
             )
 
-        if draft.total_word_count < 120:
+        if draft.total_word_count < 115:
             issues.append(
                 QAQCIssueItem(
                     issue_category="SHALLOW_SKU_HIGHLIGHTS",
                     severity="NEEDS_M2_REWRITE",
                     beat_index=None,
                     description_vi=(
-                        f"Kịch bản quá ngắn và sơ sài ({draft.total_word_count} từ < 120 từ), "
+                        f"Kịch bản quá ngắn và sơ sài ({draft.total_word_count} từ < 115 từ), "
                         "chưa đủ chiều sâu để làm nổi bật các highlight đắt giá của SKU."
                     ),
-                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 viết sâu sắc hơn (145–195 từ).",
+                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 viết sâu sắc hơn.",
                 )
             )
         elif draft.total_word_count > 230:
@@ -277,7 +277,7 @@ class M3QAQCEngine:
                     description_vi=(
                         f"Kịch bản quá dài ({draft.total_word_count} từ > 230 từ), có nguy cơ vượt trần 60s của Shorts."
                     ),
-                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 cô đọng lại trong vùng 145–195 từ.",
+                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 cô đọng lại trong vùng 130–190 từ.",
                 )
             )
         elif not (28.0 <= draft.total_duration_sec <= 58.0):
@@ -320,7 +320,32 @@ class M3QAQCEngine:
                 )
             )
 
+        banned_ai_phrases = (
+            "mẫu á quân",
+            "mẫu quán quân",
+            "kẻ làm nền",
+            "sản phẩm hoàn thiện chắc chắn từ",
+            "giải pháp chuẩn chỉnh nhất chính là",
+            "hãy đầu tư nghiêm túc vào",
+        )
         for beat in draft.beats:
+            vo_low = beat.voiceover_vi.lower()
+            matched_ai = [p for p in banned_ai_phrases if p in vo_low]
+            if matched_ai:
+                issues.append(
+                    QAQCIssueItem(
+                        issue_category="WEAK_HOOK_OR_TRANSITION",
+                        severity="NEEDS_M2_REWRITE",
+                        beat_index=beat.beat_index,
+                        description_vi=(
+                            f"Phân cảnh #{beat.beat_index} dùng cụm từ văn mẫu AI / thuật ngữ nội bộ "
+                            f"({', '.join(repr(x) for x in matched_ai)})."
+                        ),
+                        resolution_applied_vi=(
+                            "Đánh FAILED_NEEDS_REWRITE yêu cầu M2 đổi sang văn nói đời thường tự nhiên của reviewer thật."
+                        ),
+                    )
+                )
             if beat.word_count < 16:
                 issues.append(
                     QAQCIssueItem(

@@ -91,16 +91,6 @@
         "max_height": 1080,
         "view_count": 42000,
         "matched_query": "Baseus i-wok official"
-      },
-      {
-        "video_id": "Kd9aD9-ilxs",
-        "url": "https://www.youtube.com/watch?v=Kd9aD9-ilxs",
-        "title": "Baseus i-wok2 Series Screen Hanging Light Hardware Close-up",
-        "channel": "Baseus Official Partner",
-        "duration_sec": 73,
-        "max_height": 1080,
-        "view_count": 19500,
-        "matched_query": "Baseus i-wok2 close-up"
       }
     ],
     "baseus_iwok2": [
@@ -123,16 +113,6 @@
         "max_height": 1080,
         "view_count": 42000,
         "matched_query": "Baseus i-wok official"
-      },
-      {
-        "video_id": "Kd9aD9-ilxs",
-        "url": "https://www.youtube.com/watch?v=Kd9aD9-ilxs",
-        "title": "Baseus i-wok2 Series Screen Hanging Light Hardware Close-up",
-        "channel": "Baseus Official Partner",
-        "duration_sec": 73,
-        "max_height": 1080,
-        "view_count": 19500,
-        "matched_query": "Baseus i-wok2 close-up"
       }
     ],
     "logitech_lift_vertical": [
@@ -155,16 +135,6 @@
         "max_height": 1080,
         "view_count": 68000,
         "matched_query": "Logitech Lift Vertical official"
-      },
-      {
-        "video_id": "XsllCMB3Yy0",
-        "url": "https://www.youtube.com/watch?v=XsllCMB3Yy0",
-        "title": "Logitech Lift Vertical Ergonomic Mouse Hardware Close-up",
-        "channel": "Logitech Partner",
-        "duration_sec": 111,
-        "max_height": 1080,
-        "view_count": 32000,
-        "matched_query": "Logitech Lift Vertical close-up"
       }
     ],
     "logitech_vertical_lift": [
@@ -187,16 +157,6 @@
         "max_height": 1080,
         "view_count": 68000,
         "matched_query": "Logitech Lift Vertical official"
-      },
-      {
-        "video_id": "XsllCMB3Yy0",
-        "url": "https://www.youtube.com/watch?v=XsllCMB3Yy0",
-        "title": "Logitech Lift Vertical Ergonomic Mouse Hardware Close-up",
-        "channel": "Logitech Partner",
-        "duration_sec": 111,
-        "max_height": 1080,
-        "view_count": 32000,
-        "matched_query": "Logitech Lift Vertical close-up"
       }
     ],
     "tanita_kd_series": [
@@ -246,62 +206,58 @@
   },
   "verified_clean_shot_intervals": {
     "34zpkuo3c8k": [
-      [0.0, 2.3],
-      [5.0, 8.3],
-      [8.5, 11.2],
-      [13.0, 14.9],
-      [15.0, 16.9],
-      [19.0, 21.9],
-      [39.8, 42.8]
+      [0.0, 2.5, "beat1 hook ban dem man hinh moi mat goc lam viec"],
+      [5.0, 8.4, "beat2 den treo baseus iwok2 hop kim nhom thiet ke"],
+      [8.5, 12.2, "beat2 beat3 quang hoc bat doi xung khong doi xung chong choi ban phim"],
+      [13.2, 16.9, "beat2 beat3 nguon usb type c goc chieu anh sang"],
+      [19.0, 22.0, "beat3 kep man hinh xoay goc dieu chinh"],
+      [27.0, 31.0, "beat3 mau sac trung thuc nhiet do mau bao ve mat"],
+      [31.2, 33.5, "beat4 nut cam ung cham nhay thao tac"],
+      [35.2, 37.0, "beat4 nut bam cam ung nhay phong toi"],
+      [39.8, 43.1, "beat5 tong ket gia 420k goc lam viec ban dem"]
     ],
     "c9SMHp6VTH4": [
-      [2.2, 8.2],
-      [11.2, 13.5],
-      [16.0, 18.2],
-      [20.5, 22.4],
-      [25.0, 27.6],
-      [34.8, 36.8],
-      [45.6, 47.9]
-    ],
-    "Kd9aD9-ilxs": [
-      [1.5, 5.0],
-      [19.0, 23.2],
-      [28.5, 39.5],
-      [42.5, 71.5]
+      [2.2, 8.2, "beat1 beat2 den treo baseus hop kim nhom ban dem man hinh"],
+      [11.2, 13.5, "beat4 nut cam ung cham dieu chinh do sang"],
+      [16.0, 18.2, "beat3 quang hoc khong doi xung chieu sang ban phim"],
+      [20.5, 22.4, "beat3 man hinh khong choi loa"],
+      [25.0, 27.6, "beat2 kep man hinh usb type c"],
+      [34.8, 36.8, "beat2 lap dat tren vien man hinh"],
+      [45.6, 47.9, "beat5 goc lam viec ban dem sang trong"]
     ],
     "kWEbfrHi65A": [
-      [1.5, 3.8],
-      [6.1, 8.2],
-      [13.2, 15.2],
-      [20.1, 23.8],
-      [35.0, 37.2],
-      [39.5, 41.5],
-      [46.8, 49.0]
+      [0.8, 3.8, "beat1 hook ban lam viec moi co tay"],
+      [5.8, 8.4, "beat2 logitech lift goc nghieng 57 do cong thai hoc"],
+      [13.0, 15.6, "beat1 beat2 co tay tu the tu nhien do moi"],
+      [20.0, 24.2, "beat3 thao tac ban lam viec muot ma"],
+      [34.8, 37.4, "beat3 nut bam giam tieng on con lan smartwheel"],
+      [39.5, 42.0, "beat4 ban tay kich thuoc nho va trung binh"],
+      [44.8, 49.0, "beat3 beat5 goc lam viec nang suat"],
+      [50.5, 53.6, "beat4 beat5 cam nam ban tay"]
     ],
     "mqYjLYhvNsI": [
-      [37.8, 41.2],
-      [63.5, 68.8]
-    ],
-    "XsllCMB3Yy0": [
-      [42.0, 49.0],
-      [56.0, 89.0]
+      [7.5, 11.5, "beat2 thiet ke chuot dung logitech lift"],
+      [27.5, 41.5, "beat2 beat4 pin aa dau thu logi bolt bluetooth"],
+      [47.5, 52.0, "beat3 cam bien quang hoc 4000 dpi mat day"],
+      [63.5, 71.0, "beat5 tong ket chuot khong day logi bolt"],
+      [127.0, 132.5, "beat3 ket noi da thiet bi nut chuyen"]
     ],
     "LVymY78FSBI": [
-      [11.5, 14.0],
-      [23.5, 29.8],
-      [36.0, 42.8],
-      [59.5, 61.8],
-      [73.5, 84.8]
+      [11.5, 14.0, "beat1 hook can nha bep chinh xac"],
+      [23.5, 29.8, "beat2 thiet ke can tanita nhat ban"],
+      [36.0, 42.8, "beat3 thao tac can nguyen lieu"],
+      [59.5, 61.8, "beat4 luu y su dung"],
+      [73.5, 84.8, "beat3 beat5 tru bi tare can bot"]
     ],
     "kSofEP0V3KY": [
-      [5.2, 9.5],
-      [9.6, 14.0],
-      [14.1, 18.5],
-      [34.0, 35.8],
-      [41.2, 46.0],
-      [46.2, 51.0],
-      [51.2, 56.5],
-      [56.6, 62.2]
+      [5.2, 9.5, "beat1 hook can dien tu nha bep tanita"],
+      [9.6, 14.0, "beat2 thiet ke mat can man hinh lcd"],
+      [14.1, 18.5, "beat2 beat3 cam bien nhay sai so 0.1g"],
+      [34.0, 35.8, "beat3 che do ml dong nuoc sua"],
+      [41.2, 46.0, "beat3 tru bi tare dong nguyen lieu"],
+      [46.2, 51.0, "beat3 can chinh xac"],
+      [51.2, 56.5, "beat4 chong nuoc nhe ve sinh"],
+      [56.6, 62.2, "beat5 tong ket gia 320k"]
     ]
   }
 }
