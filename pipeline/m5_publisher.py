@@ -236,7 +236,7 @@ class M5PublisherEngine:
                 "snippet": {
                     "topLevelComment": {
                         "snippet": {
-                            "textOriginal": pkg.pinned_comment_vi,
+                            "textOriginal": pkg.youtube_pinned_comment_vi or pkg.pinned_comment_vi,
                         }
                     }
                 }
@@ -353,7 +353,7 @@ class M5PublisherEngine:
                             "videoId": video_id,
                             "topLevelComment": {
                                 "snippet": {
-                                    "textOriginal": pkg.pinned_comment_vi,
+                                    "textOriginal": pkg.youtube_pinned_comment_vi or pkg.pinned_comment_vi,
                                 }
                             },
                         }

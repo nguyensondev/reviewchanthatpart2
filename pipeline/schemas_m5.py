@@ -88,7 +88,11 @@ class PublishVideoPackageItem(BaseModel):
     )
     pinned_comment_vi: str = Field(
         default="",
-        description="Bình luận đầu tiên / Bình luận ghim gắn Link Shopee Mall Chính Hãng",
+        description="Bình luận đầu tiên / Bình luận ghim gắn Link Shopee Mall Chính Hãng (giữ nguyên cho Facebook Reels)",
+    )
+    youtube_pinned_comment_vi: str = Field(
+        default="",
+        description="Bình luận đầu tiên tối ưu riêng cho YouTube Shorts (kèm hướng dẫn bấm Bio Hub kênh hoặc copy link)",
     )
     hashtags: List[str] = Field(default_factory=list)
     all_links_ready: bool = False

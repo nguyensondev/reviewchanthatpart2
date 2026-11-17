@@ -698,11 +698,16 @@ class PublishPackager:
                     f"   • Link dự phòng toàn bộ gian hàng Shopee Mall ({s_item.brand}): {s_item.mall_search_affiliate_link}"
                 )
 
-        # 1. Pinned Comment (Varied natural human intro to avoid anti-spam comment fingerprinting)
+        # 1. Pinned Comment (Facebook Reels keeps exact status quo; YouTube Shorts adds Bio Hub click guide)
         varied_intro = HumanBehaviorGuard.pick_varied_pinned_comment_intro(entry.script_id)
         pinned_comment = f"{varied_intro}\n" + "\n".join(pinned_lines)
+        yt_bio_guide = (
+            "💡 Do YouTube Shorts khóa bấm link trực tiếp ở bình luận, bạn bấm vào tên kênh @shibagamerc "
+            "-> ấn link Bio đầu trang Kênh `go.gocreviewchanthuc.workers.dev` (hoặc copy nhanh link bên dưới) để mở thẳng Shopee Mall nhé:"
+        )
+        yt_pinned_comment = f"{varied_intro}\n{yt_bio_guide}\n" + "\n".join(pinned_lines)
 
-        # 2. Facebook Reels Checklist Caption (High-retention feed format)
+        # 2. Facebook Reels Checklist Caption (High-retention feed format — 100% status quo)
         reels_caption = (
             f"{fb_title}\n\n"
             + ("✅ Điểm đáng tiền qua kiểm chứng:\n" + "\n".join(pros_bullets[:3]) + "\n\n" if pros_bullets else "")
@@ -718,7 +723,7 @@ class PublishPackager:
         search_keywords_footer = ", ".join(yt_tags[:10])
         yt_description = (
             f"{fb_title} — Đánh giá chi tiết thông số kỹ thuật, ưu điểm và nhược điểm thực tế trước khi mua.\n\n"
-            f"{pinned_comment}\n\n"
+            f"{yt_pinned_comment}\n\n"
             + ("🔧 THÔNG SỐ & ĐIỂM NỔI BẬT:\n" + "\n".join(spec_bullets + pros_bullets[:2]) + "\n\n" if (spec_bullets or pros_bullets) else "")
             + ("⚠️ NHƯỢC ĐIỂM CẦN LƯU Ý TRƯỚC KHI MUA:\n" + "\n".join(caveat_bullets) + "\n\n" if caveat_bullets else "")
             + ("⏱️ MỐC THỜI GIAN TRONG VIDEO (TIMESTAMPS):\n" + "\n".join(chapters) + "\n\n" if chapters else "")
@@ -764,6 +769,7 @@ class PublishPackager:
             tiktok_caption_full_vi=reels_caption,
             facebook_reels_caption_full_vi=reels_caption,
             pinned_comment_vi=pinned_comment,
+            youtube_pinned_comment_vi=yt_pinned_comment,
             hashtags=hashtags,
             all_links_ready=all_ready,
             skus=resolved_skus,
