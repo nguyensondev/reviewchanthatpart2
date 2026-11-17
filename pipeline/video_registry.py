@@ -139,6 +139,42 @@ class VideoRegistryManager:
         self._save_raw(raw)
         return added_or_updated
 
+    @staticmethod
+    def purge_script_from_m2_m3_files(script_id: str) -> None:
+        """
+        Once M4 has rendered `script_id` into an MP4 video, delete `script_id` from
+        `data/m2_script_drafts.json` and `data/m3_approved_scripts.json` so script files never bloat.
+        """
+        m2_path = PROJECT_ROOT / "data" / "m2_script_drafts.json"
+        if m2_path.exists():
+            try:
+                m2_raw = safe_load_json(m2_path, lambda: {})
+                if isinstance(m2_raw, dict) and isinstance(m2_raw.get("script_drafts"), list):
+                    before_len = len(m2_raw["script_drafts"])
+                    m2_raw["script_drafts"] = [
+                        d for d in m2_raw["script_drafts"]
+                        if isinstance(d, dict) and d.get("script_id") != script_id
+                    ]
+                    if len(m2_raw["script_drafts"]) != before_len:
+                        atomic_write_json(m2_path, m2_raw)
+            except Exception:
+                pass
+
+        m3_path = PROJECT_ROOT / "data" / "m3_approved_scripts.json"
+        if m3_path.exists():
+            try:
+                m3_raw = safe_load_json(m3_path, lambda: {})
+                if isinstance(m3_raw, dict) and isinstance(m3_raw.get("audited_scripts"), list):
+                    before_len = len(m3_raw["audited_scripts"])
+                    m3_raw["audited_scripts"] = [
+                        s for s in m3_raw["audited_scripts"]
+                        if isinstance(s, dict) and s.get("script_id") != script_id
+                    ]
+                    if len(m3_raw["audited_scripts"]) != before_len:
+                        atomic_write_json(m3_path, m3_raw)
+            except Exception:
+                pass
+
     def mark_video_rendered(
         self,
         script_id: str,
@@ -151,8 +187,9 @@ class VideoRegistryManager:
         normalized_sku_keys: Optional[List[str]] = None,
     ) -> VideoRegistryEntry:
         """
-        Mark a script as `RENDERED` (video produced on disk, NOT published yet).
-        Never sets `PUBLISHED`.
+        Mark a script as `RENDERED` (video produced on disk, NOT published yet) and immediately
+        purge its raw script payload from `video_registry.json`, `m2_script_drafts.json`, and
+        `m3_approved_scripts.json` to prevent data bloat.
         """
         raw = self._load_raw()
         items = raw.setdefault("items", {})
@@ -178,7 +215,7 @@ class VideoRegistryManager:
                 voice_name=voice_name,
                 voice_gender=voice_gender,
                 bgm_track=bgm_track,
-                script_payload=script_obj.model_dump(mode="json"),
+                script_payload=None,
             )
         else:
             existing["status"] = "RENDERED"
@@ -188,10 +225,10 @@ class VideoRegistryManager:
             existing["voice_name"] = voice_name
             existing["voice_gender"] = voice_gender
             existing["bgm_track"] = bgm_track
+            existing["script_payload"] = None
             if normalized_sku_keys is not None:
                 existing["normalized_sku_keys"] = list(normalized_sku_keys)
             if script_obj is not None:
-                existing["script_payload"] = script_obj.model_dump(mode="json")
                 existing.setdefault("script_id", script_obj.script_id)
                 existing.setdefault("script_format", script_obj.script_format)
                 existing.setdefault("domain", script_obj.domain)
@@ -212,7 +249,19 @@ class VideoRegistryManager:
 
         items[script_id] = entry.model_dump(mode="json")
         self._save_raw(raw)
+        if self.registry_path == DEFAULT_VIDEO_REGISTRY_PATH:
+            self.purge_script_from_m2_m3_files(script_id)
         return entry
+
+    def delete_entry(self, script_id: str) -> bool:
+        """Completely remove `script_id` from `video_registry.json`."""
+        raw = self._load_raw()
+        items = raw.get("items") or {}
+        if script_id in items:
+            items.pop(script_id, None)
+            self._save_raw(raw)
+            return True
+        return False
 
     def mark_video_published(
         self,
@@ -224,6 +273,8 @@ class VideoRegistryManager:
         Record platform publication for `script_id`. Supports partial crash-resume:
         if `required_platforms` has multiple targets (e.g. `['youtube_shorts', 'facebook_reels']`),
         `status` remains `RENDERED` until every required platform is in `published_platforms`.
+        Once all required platforms succeed (`status == 'PUBLISHED'`), the entry is automatically
+        purged from `video_registry.json` so completed videos never accumulate.
         """
         raw = self._load_raw()
         items = raw.setdefault("items", {})
@@ -246,7 +297,10 @@ class VideoRegistryManager:
             existing["status"] = "PUBLISHED"
 
         entry = VideoRegistryEntry.model_validate(existing)
-        items[script_id] = entry.model_dump(mode="json")
+        if entry.status == "PUBLISHED":
+            items.pop(script_id, None)
+        else:
+            items[script_id] = entry.model_dump(mode="json")
         self._save_raw(raw)
         return entry
 

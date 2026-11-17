@@ -133,6 +133,11 @@ def print_pipeline_status() -> None:
         f"• Quota Render Video (M4): {v_used}/{MAX_VIDEOS_PER_DAY} đã render hôm nay (còn lại: {v_rem})",
         flush=True,
     )
+    m5_u, m5_lim, m5_rem, _ = M5PublisherEngine().get_daily_publish_quota_status()
+    print(
+        f"• Quota Đăng Bài (M5)    : {m5_u}/{m5_lim} đã đăng hôm nay (random 1-2 video/ngày, còn lại: {m5_rem})",
+        flush=True,
+    )
     print(
         f"• Nhịp nghỉ 2h (M4)      : status={cd_status} | can_render_now={can_now} | "
         f"wait={wait_secs}s (next_allowed={cd['next_render_allowed_at'] or 'NOW'})",
@@ -386,7 +391,13 @@ def main() -> int:
             allow_rerender_same_id=False,
             ignore_cooldown=args.ignore_2h_cooldown,
         )
-        if not can_now:
+        unposted_now = vreg.get_rendered_unposted_videos()
+        if len(unposted_now) >= 2 and not args.ignore_2h_cooldown:
+            print(
+                f"[AUTO] Đang có sẵn {len(unposted_now)} video RENDERED chờ M5 đăng. Tạm ngưng render mới để tránh phình ổ cứng!",
+                flush=True,
+            )
+        elif not can_now:
             print(
                 f"[AUTO] M4 đang trong nhịp nghỉ tự nhiên (status={cd_status}, wait={wait_secs}s).",
                 flush=True,

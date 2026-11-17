@@ -535,6 +535,15 @@ class PublishPackager:
             for b in script.beats:
                 if b.beat_index not in beat_start_sec:
                     beat_start_sec[b.beat_index] = b.start_sec
+        else:
+            est_dur = max(32.0, float(entry.render_duration_sec or 45.0))
+            beat_start_sec = {
+                1: 0.0,
+                2: round(est_dur * 0.20, 1),
+                3: round(est_dur * 0.42, 1),
+                4: round(est_dur * 0.65, 1),
+                5: round(est_dur * 0.83, 1),
+            }
 
         lines: List[str] = []
         for b_idx in sorted(beat_titles.keys()):

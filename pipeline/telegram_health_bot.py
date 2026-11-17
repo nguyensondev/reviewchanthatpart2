@@ -252,7 +252,7 @@ class PipelineHealthInspector:
         else:
             drafts = d.get("script_drafts") or []
             lines.append(
-                f"{'🟢' if drafts else '🟡'} M2 (Viết kịch bản): {len(drafts)} bản nháp ({_short_ts(str(d.get('generated_at') or ''))})"
+                f"🟢 M2 (Viết kịch bản): {len(drafts)} bản chờ render (đã xóa bản đã dựng) ({_short_ts(str(d.get('generated_at') or ''))})"
             )
 
         # M3
@@ -264,10 +264,10 @@ class PipelineHealthInspector:
             failed_rw = sum(1 for a in audits if a.get("qaqc_status") == "FAILED_NEEDS_REWRITE")
             rej = sum(1 for a in audits if a.get("qaqc_status") == "REJECTED")
             app = len(audits) - failed_rw - rej
-            icon = "🟢" if (app > 0 and failed_rw == 0 and rej == 0) else ("🟡" if app > 0 else "🔴")
+            icon = "🟢" if (failed_rw == 0 and rej == 0) else "🟡"
             extra = f", {failed_rw} chờ viết lại" if failed_rw else ""
             lines.append(
-                f"{icon} M3 (Kiểm định QA/QC): {app}/{len(audits)} đạt chuẩn{extra} ({_short_ts(str(d.get('generated_at') or ''))})"
+                f"{icon} M3 (Kiểm định QA/QC): {app} chờ render{extra} ({_short_ts(str(d.get('generated_at') or ''))})"
             )
 
         # M4
@@ -283,10 +283,10 @@ class PipelineHealthInspector:
                 )
                 if not vp.exists():
                     missing_mp4 += 1
-            icon = "🔴" if missing_mp4 > 0 else ("🟢" if rvs else "🟡")
+            icon = "🔴" if missing_mp4 > 0 else "🟢"
             miss_txt = f" (⚠️ thiếu {missing_mp4} file MP4)" if missing_mp4 else ""
             lines.append(
-                f"{icon} M4 (Dựng video 9:16): {len(rvs)} video đã dựng{miss_txt} ({_short_ts(str(d.get('generated_at') or ''))})"
+                f"{icon} M4 (Dựng video 9:16): {len(rvs)} video chờ đăng{miss_txt} ({_short_ts(str(d.get('generated_at') or ''))})"
             )
 
         # M5
@@ -405,6 +405,13 @@ class PipelineHealthInspector:
 
         m5_st = safe_load_json(DATA_DIR / "m5_publish_state.json", lambda: {})
         next_pub = str(m5_st.get("next_publish_allowed_at") or "") if isinstance(m5_st, dict) else ""
+        m5_days = m5_st.get("days") if isinstance(m5_st, dict) and isinstance(m5_st.get("days"), dict) else {}
+        m5_today_bucket = m5_days.get(qm.today_key()) if isinstance(m5_days, dict) else {}
+        if not isinstance(m5_today_bucket, dict):
+            m5_today_bucket = {}
+        m5_lim = int(m5_today_bucket.get("daily_limit") or 2)
+        m5_used = len(m5_today_bucket.get("published_script_ids") or [])
+        m5_rem = max(0, m5_lim - m5_used)
 
         lines = [
             f"📊 QUOTA & HÀNG ĐỢI ({qm.today_key()})",
@@ -412,13 +419,13 @@ class PipelineHealthInspector:
             f"• Khung giờ hoạt động (08:15–22:15): {'🟢 Đang mở' if in_hrs else f'🌙 Đang ngủ đêm (còn {wait_hrs // 60} phút)'}",
             f"• Quota Kịch bản (M3): {s_used}/{MAX_FINAL_SCRIPTS_PER_DAY} (còn {s_rem})",
             f"• Quota Render (M4): {v_used}/{MAX_VIDEOS_PER_DAY} (còn {v_rem})",
+            f"• Quota Đăng bài (M5, random 1–2/ngày): {m5_used}/{m5_lim} (còn {m5_rem})",
             f"• Nhịp nghỉ Render 2h: {'🟢 Sẵn sàng' if can_now else f'⏳ {cd_status} (còn {wait_secs // 60} phút)'}",
             f"• Lịch đăng M5 tiếp theo: {_short_ts(next_pub) if next_pub else 'Sẵn sàng khi đủ giờ'}",
             "",
-            "📦 Sổ Trạng Thái Video:",
-            f"• Chờ render (`SCRIPT_APPROVED`): {cnt_approved}",
-            f"• Đã render chờ đăng (`RENDERED`): {cnt_rendered}",
-            f"• Đã đăng hoàn tất (`PUBLISHED`): {cnt_published}",
+            "📦 Sổ Trạng Thái Video (Tự xóa khi xong):",
+            f"• Kịch bản chờ render (`SCRIPT_APPROVED`): {cnt_approved} (tự xóa script khi M4 render xong)",
+            f"• Video chờ đăng (`RENDERED`): {cnt_rendered} (tự xóa video khi M5 đăng xong 2 kênh)",
         ]
         return "\n".join(lines)
 

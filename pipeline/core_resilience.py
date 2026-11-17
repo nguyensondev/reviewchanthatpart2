@@ -421,12 +421,87 @@ class StorageGarbageCollector:
                 except OSError:
                     pass
 
+        # 5. Purge PUBLISHED videos completely & strip script payloads for RENDERED videos
+        freed_published = 0
+        vreg_path = self.data_dir / "video_registry.json"
+        if vreg_path.exists():
+            try:
+                vreg_raw = safe_load_json(vreg_path, lambda: {})
+                items = vreg_raw.get("items") if isinstance(vreg_raw, dict) else None
+                if isinstance(items, dict):
+                    vreg_changed = False
+                    rendered_ids_to_strip_scripts: set[str] = set()
+                    published_ids_to_purge: set[str] = set()
+
+                    for sid, val in list(items.items()):
+                        if not isinstance(val, dict):
+                            continue
+                        st_val = val.get("status")
+                        if st_val == "RENDERED":
+                            rendered_ids_to_strip_scripts.add(sid)
+                            if val.get("script_payload") is not None:
+                                val["script_payload"] = None
+                                vreg_changed = True
+                        elif st_val == "PUBLISHED":
+                            published_ids_to_purge.add(sid)
+                            rendered_ids_to_strip_scripts.add(sid)
+                            mp4_p = MacOSLegacyRuntime.resolve_portable_video_path(val.get("video_path"), sid)
+                            if mp4_p.exists():
+                                freed_published += mp4_p.stat().st_size
+                                mp4_p.unlink(missing_ok=True)
+                            items.pop(sid, None)
+                            vreg_changed = True
+
+                    if vreg_changed:
+                        atomic_write_json(vreg_path, vreg_raw)
+
+                    # Strip rendered/published scripts from m2_script_drafts.json & m3_approved_scripts.json
+                    if rendered_ids_to_strip_scripts:
+                        for fname, list_key in (
+                            ("m2_script_drafts.json", "script_drafts"),
+                            ("m3_approved_scripts.json", "audited_scripts"),
+                        ):
+                            fpath = self.data_dir / fname
+                            if fpath.exists():
+                                fdata = safe_load_json(fpath, lambda: {})
+                                if isinstance(fdata, dict) and isinstance(fdata.get(list_key), list):
+                                    old_len = len(fdata[list_key])
+                                    fdata[list_key] = [
+                                        x for x in fdata[list_key]
+                                        if isinstance(x, dict) and x.get("script_id") not in rendered_ids_to_strip_scripts
+                                    ]
+                                    if len(fdata[list_key]) != old_len:
+                                        atomic_write_json(fpath, fdata)
+
+                    # Clean up M4 output & M5 payloads/manifest for purged PUBLISHED videos
+                    if published_ids_to_purge:
+                        payloads_dir = OUTPUT_DIR / "publish_pack" / "m5_payloads"
+                        if payloads_dir.exists():
+                            for pid in published_ids_to_purge:
+                                for pf in payloads_dir.glob(f"{pid}_*.json"):
+                                    freed_published += pf.stat().st_size
+                                    pf.unlink(missing_ok=True)
+                        m4_out_p = self.data_dir / "m4_production_output.json"
+                        if m4_out_p.exists():
+                            m4_d = safe_load_json(m4_out_p, lambda: {})
+                            if isinstance(m4_d, dict) and isinstance(m4_d.get("rendered_videos"), list):
+                                old_l = len(m4_d["rendered_videos"])
+                                m4_d["rendered_videos"] = [
+                                    rv for rv in m4_d["rendered_videos"]
+                                    if isinstance(rv, dict) and rv.get("script_id") not in published_ids_to_purge
+                                ]
+                                if len(m4_d["rendered_videos"]) != old_l:
+                                    atomic_write_json(m4_out_p, m4_d)
+            except Exception:
+                pass
+
         return {
             "freed_browser_profile_bytes": freed_profile,
             "freed_work_bytes": freed_work,
             "freed_video_cache_bytes": freed_cache,
             "freed_logs_bytes": freed_logs,
-            "total_freed_bytes": freed_profile + freed_work + freed_cache + freed_logs,
+            "freed_published_bytes": freed_published,
+            "total_freed_bytes": freed_profile + freed_work + freed_cache + freed_logs + freed_published,
         }
 
 

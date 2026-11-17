@@ -27,8 +27,8 @@ from pipeline.core_resilience import (
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_QUOTA_STATE_PATH = PROJECT_ROOT / "data" / "daily_quota_state.json"
 
-MAX_FINAL_SCRIPTS_PER_DAY = 4
-MAX_VIDEOS_PER_DAY = 3
+MAX_FINAL_SCRIPTS_PER_DAY = 3
+MAX_VIDEOS_PER_DAY = 2
 MIN_RENDER_COOLDOWN_SECONDS = 7200  # 2 hours rest after each rendered video
 
 

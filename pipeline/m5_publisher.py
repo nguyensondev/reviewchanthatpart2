@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import random
+import shutil
 import time
 import urllib.parse
 from pathlib import Path
@@ -52,6 +54,9 @@ DEFAULT_CREDENTIALS_PATH = CONFIG_DIR / "platform_credentials.json"
 M5_PAYLOADS_DIR = PUBLISH_PACK_DIR / "m5_payloads"
 DEFAULT_M5_REPORT_PATH = PROJECT_ROOT / "data" / "m5_publish_report.json"
 DEFAULT_M5_COOLDOWN_PATH = PROJECT_ROOT / "data" / "m5_publish_state.json"
+
+M5_MIN_DAILY_VIDEOS = 1
+M5_MAX_DAILY_VIDEOS = 2
 
 
 class M5ValidationCheck(BaseModel):
@@ -112,24 +117,83 @@ class M5PublisherEngine:
         return data if isinstance(data, dict) else {}
 
     def _load_m5_state(self) -> Dict[str, Any]:
-        data = safe_load_json(self.state_path, lambda: {"next_publish_allowed_at": "", "events": []})
-        return data if isinstance(data, dict) else {"next_publish_allowed_at": "", "events": []}
+        data = safe_load_json(self.state_path, lambda: {"next_publish_allowed_at": "", "events": [], "days": {}})
+        if not isinstance(data, dict):
+            return {"next_publish_allowed_at": "", "events": [], "days": {}}
+        data.setdefault("days", {})
+        return data
 
     def _save_m5_state(self, state: Dict[str, Any]) -> None:
         events = state.get("events")
         if isinstance(events, list) and len(events) > 60:
             state["events"] = events[-60:]
+        days = state.get("days")
+        if isinstance(days, dict) and len(days) > 30:
+            for old_k in sorted(days.keys())[:-30]:
+                days.pop(old_k, None)
         atomic_write_json(self.state_path, state)
 
-    def can_publish_human_now(self, force_now: bool = False, now: Optional[dt.datetime] = None) -> Tuple[bool, str, int]:
+    def get_daily_publish_quota_status(
+        self, now: Optional[dt.datetime] = None
+    ) -> Tuple[int, int, int, List[str]]:
         """
-        Check both Human Active Hours (`08:15 – 22:15` +- daily jitter) AND natural jittered
-        inter-post cooldown (`2h12m .. 3h55m`).
+        Return `(used_today, daily_limit, remaining_today, published_ids_today)` for M5.
+        Each day's `daily_limit` is hard-locked to a random integer in `[1, 2]` (`M5_MIN_DAILY_VIDEOS..M5_MAX_DAILY_VIDEOS`).
         """
+        now_dt = now or dt.datetime.now().astimezone()
+        day_key = now_dt.strftime("%Y-%m-%d")
+        st = self._load_m5_state()
+        days = st.setdefault("days", {})
+        bucket = days.get(day_key)
+        changed = False
+        if not isinstance(bucket, dict):
+            bucket = {
+                "daily_limit": random.randint(M5_MIN_DAILY_VIDEOS, M5_MAX_DAILY_VIDEOS),
+                "published_script_ids": [],
+            }
+            days[day_key] = bucket
+            changed = True
+        else:
+            if "daily_limit" not in bucket or bucket["daily_limit"] not in (1, 2):
+                bucket["daily_limit"] = random.randint(M5_MIN_DAILY_VIDEOS, M5_MAX_DAILY_VIDEOS)
+                changed = True
+            if not isinstance(bucket.get("published_script_ids"), list):
+                bucket["published_script_ids"] = []
+                changed = True
+        if changed:
+            self._save_m5_state(st)
+
+        pub_ids = list(bucket["published_script_ids"])
+        limit = int(bucket["daily_limit"])
+        used = len(pub_ids)
+        rem = max(0, limit - used)
+        return used, limit, rem, pub_ids
+
+    def can_publish_human_now(
+        self,
+        force_now: bool = False,
+        now: Optional[dt.datetime] = None,
+        script_id: Optional[str] = None,
+    ) -> Tuple[bool, str, int]:
+        """
+        Check:
+          1. Hard Daily Random Publish Quota (`1` or `2` videos/day max)
+          2. Human Active Hours (`08:15 – 22:15`)
+          3. Natural jittered inter-post cooldown (`2h12m .. 3h55m`)
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        used_today, limit_today, rem_today, pub_ids_today = self.get_daily_publish_quota_status(now=now_dt)
+
+        # Allow finishing the second platform for a video already counted in today's quota
+        is_resuming_today_video = bool(script_id and script_id in pub_ids_today)
+        if not force_now and not is_resuming_today_video and rem_today <= 0:
+            tomorrow = (now_dt + dt.timedelta(days=1)).replace(hour=8, minute=15, second=0, microsecond=0)
+            wait_tomorrow = max(60, int((tomorrow - now_dt).total_seconds()))
+            return False, f"DAILY_M5_QUOTA_REACHED_{used_today}_OF_{limit_today}", wait_tomorrow
+
         if force_now:
             return True, "FORCED_NOW", 0
 
-        now_dt = now or dt.datetime.now().astimezone()
         in_hours, wait_hours_sec = HumanBehaviorGuard.is_within_human_active_hours(now=now_dt)
         if not in_hours:
             return False, "OUTSIDE_HUMAN_ACTIVE_HOURS", wait_hours_sec
@@ -150,11 +214,24 @@ class M5PublisherEngine:
 
     def _record_human_publish_event(self, script_id: str, platforms: List[str]) -> str:
         now_dt = dt.datetime.now().astimezone()
+        day_key = now_dt.strftime("%Y-%m-%d")
         jitter_cd = HumanBehaviorGuard.sample_human_cooldown_seconds(min_floor_sec=7920)
         next_dt = now_dt + dt.timedelta(seconds=jitter_cd)
         next_iso = next_dt.isoformat(timespec="seconds")
 
         st = self._load_m5_state()
+        days = st.setdefault("days", {})
+        bucket = days.setdefault(
+            day_key,
+            {
+                "daily_limit": random.randint(M5_MIN_DAILY_VIDEOS, M5_MAX_DAILY_VIDEOS),
+                "published_script_ids": [],
+            },
+        )
+        pub_list = bucket.setdefault("published_script_ids", [])
+        if script_id and script_id not in pub_list:
+            pub_list.append(script_id)
+
         st["next_publish_allowed_at"] = next_iso
         st.setdefault("events", []).append(
             {
@@ -167,6 +244,67 @@ class M5PublisherEngine:
         )
         self._save_m5_state(st)
         return next_iso
+
+    def _purge_completed_video_everywhere(self, script_id: str, video_path: str = "") -> None:
+        """
+        Once a video has been published to BOTH platforms (`status == 'PUBLISHED'`), completely
+        remove the MP4 file, staged M5 payload JSONs, script records, and manifest entries so
+        zero stale data ever accumulates on disk.
+        """
+        # 1. Delete MP4 file on disk
+        try:
+            resolved_mp4 = MacOSLegacyRuntime.resolve_portable_video_path(video_path, script_id)
+            resolved_mp4.unlink(missing_ok=True)
+        except Exception:
+            pass
+        (OUTPUT_DIR / "videos" / f"{script_id}.mp4").unlink(missing_ok=True)
+
+        # 2. Delete staged M5 payloads and any M4 work dir
+        for p in self.payloads_dir.glob(f"{script_id}_*.json"):
+            p.unlink(missing_ok=True)
+        work_dir = PROJECT_ROOT / "data" / "m4_work" / script_id
+        if work_dir.exists():
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+        # 3. Delete from video_registry.json & script files
+        self.video_registry.delete_entry(script_id)
+        self.video_registry.purge_script_from_m2_m3_files(script_id)
+
+        # 4. Delete from data/m4_production_output.json
+        m4_out_path = PROJECT_ROOT / "data" / "m4_production_output.json"
+        if m4_out_path.exists():
+            try:
+                m4_raw = safe_load_json(m4_out_path, lambda: {})
+                if isinstance(m4_raw, dict) and isinstance(m4_raw.get("rendered_videos"), list):
+                    m4_raw["rendered_videos"] = [
+                        rv for rv in m4_raw["rendered_videos"]
+                        if isinstance(rv, dict) and rv.get("script_id") != script_id
+                    ]
+                    atomic_write_json(m4_out_path, m4_raw)
+            except Exception:
+                pass
+
+        # 5. Delete from output/publish_pack/publish_manifest.json
+        if self.manifest_path.exists():
+            try:
+                man_raw = safe_load_json(self.manifest_path, lambda: {})
+                if isinstance(man_raw, dict) and isinstance(man_raw.get("packages"), list):
+                    man_raw["packages"] = [
+                        pk for pk in man_raw["packages"]
+                        if isinstance(pk, dict) and pk.get("script_id") != script_id
+                    ]
+                    man_raw["total_rendered_unposted_videos"] = len(man_raw["packages"])
+                    man_raw["ready_to_publish_count"] = sum(
+                        1 for pk in man_raw["packages"] if isinstance(pk, dict) and pk.get("all_links_ready")
+                    )
+                    atomic_write_json(self.manifest_path, man_raw)
+            except Exception:
+                pass
+
+        print(
+            f"[M5 CLEANUP] Đã xóa hoàn toàn video & dữ liệu liên quan của `{script_id}` sau khi đăng đủ các nền tảng!",
+            flush=True,
+        )
 
     def validate_and_stage_package(self, pkg: PublishVideoPackageItem) -> M5ValidationCheck:
         """
@@ -454,6 +592,11 @@ class M5PublisherEngine:
                     required_platforms=platforms,
                 )
             status_after = entry.status if entry else "NOT_FOUND"
+            if status_after == "PUBLISHED":
+                self._purge_completed_video_everywhere(
+                    mark_published_script_id,
+                    (entry.video_path or "") if entry else "",
+                )
             print(
                 f"[M5] Đã đánh dấu `{mark_published_script_id}` -> status={status_after} (platforms={platforms})",
                 flush=True,
@@ -530,16 +673,19 @@ class M5PublisherEngine:
                 )
                 continue
 
-            # Anti-Spam Human Guard: Max 1 video uploaded per invocation, and only inside active human window!
-            if published_count >= 1 or not can_pub_now:
-                defer_note = pub_gate_reason if not can_pub_now else "MAX_1_VIDEO_PER_HUMAN_SESSION"
+            can_pkg_now, pkg_gate_reason, pkg_wait_sec = self.can_publish_human_now(
+                force_now=force_now, script_id=pkg.script_id
+            )
+            # Anti-Spam Human Guard: Max 1-2 videos/day hard cap, max 1 video uploaded per invocation, and only inside active human window!
+            if published_count >= 1 or not can_pkg_now:
+                defer_note = pkg_gate_reason if not can_pkg_now else "MAX_1_VIDEO_PER_HUMAN_SESSION"
                 results.append(
                     M5PublishItemResult(
                         script_id=pkg.script_id,
                         mode="HUMAN_PACING_DEFERRED",
                         validation_passed=v_check.passed,
-                        youtube_status=f"DEFERRED ({defer_note}, wait={wait_pub_sec}s)",
-                        facebook_reels_status=f"DEFERRED ({defer_note}, wait={wait_pub_sec}s)",
+                        youtube_status=f"DEFERRED ({defer_note}, wait={pkg_wait_sec}s)",
+                        facebook_reels_status=f"DEFERRED ({defer_note}, wait={pkg_wait_sec}s)",
                     )
                 )
                 continue
@@ -618,6 +764,9 @@ class M5PublisherEngine:
             if uploaded_platforms_now:
                 published_count += 1
                 next_allowed_str = self._record_human_publish_event(pkg.script_id, uploaded_platforms_now)
+
+            if item_res.registry_status_after == "PUBLISHED":
+                self._purge_completed_video_everywhere(pkg.script_id, pkg.video_path)
 
             if uploaded_platforms_now or "ERROR" in item_res.youtube_status or "ERROR" in item_res.facebook_reels_status:
                 TelegramNotifier().notify_publish_result(
