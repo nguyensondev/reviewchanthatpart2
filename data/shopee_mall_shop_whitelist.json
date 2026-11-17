@@ -1,0 +1,111 @@
+{
+  "version": "1.0.0",
+  "description": "Danh sách trắng (Whitelist) các Shop ID chính hãng (Shopee Mall / Official Store / Ủy quyền chính thức) trên Shopee Việt Nam để đảm bảo 100% không bao giờ gắn nhầm link vào shop trôi nổi.",
+  "brands": {
+    "Logitech": {
+      "brand_name": "Logitech",
+      "official_shop_ids": ["52679373", "10973"],
+      "official_shop_usernames": ["logitech_official_shop", "logitech.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {
+        "logitech_lift_vertical": {
+          "shop_id": "52679373",
+          "item_id": "18804735595",
+          "shop_name": "Logitech Official Shop (Shopee Mall)",
+          "product_name": "Chuột công thái học không dây Logitech Lift Vertical - Bluetooth | Logi Bolt USB"
+        }
+      }
+    },
+    "Baseus": {
+      "brand_name": "Baseus",
+      "official_shop_ids": ["1118576800", "995454111", "352912552", "1016197332"],
+      "official_shop_usernames": ["baseus.official.mall.vn", "baseusofficial.vietnam", "baseus.flagship.vn", "baseus.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {
+        "baseus_i_wok2": {
+          "shop_id": "1118576800",
+          "item_id": "24256337154",
+          "shop_name": "Baseus Official Mall (Shopee Mall)",
+          "product_name": "Đèn Treo Màn Hình Chống Chói Bảo Vệ Mắt Baseus i-wok2 Series Screen Hanging Light"
+        }
+      }
+    },
+    "Tanita": {
+      "brand_name": "Tanita",
+      "official_shop_ids": ["61265821"],
+      "official_shop_usernames": ["tanita_vietnam"],
+      "prefer_mall_search": false,
+      "verified_sku_items": {
+        "tanita_kd_series": {
+          "shop_id": "61265821",
+          "item_id": "6878146390",
+          "shop_name": "Tanita Authorized Store (61265821)",
+          "product_name": "Cân điện tử nhà bếp TANITA Nhật Bản dòng KD-Series chính xác cao"
+        }
+      }
+    },
+    "Lock&Lock": {
+      "brand_name": "Lock&Lock",
+      "official_shop_ids": ["55771655", "1639516234", "1653171136"],
+      "official_shop_usernames": ["locknlockvn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Ugreen": {
+      "brand_name": "Ugreen",
+      "official_shop_ids": ["65589552", "173392916"],
+      "official_shop_usernames": ["ugreen.vn", "ugreenshop", "ugreen_vietnam_store", "ugreen_flagship_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Anker": {
+      "brand_name": "Anker",
+      "official_shop_ids": ["16693352", "39556157"],
+      "official_shop_usernames": ["ankermall.vn", "anker_vietnam_official"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Inochi": {
+      "brand_name": "Inochi",
+      "official_shop_ids": ["265159609"],
+      "official_shop_usernames": ["inochiofficial", "inochi.official.store", "inochimall", "inochivietnammall"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Elmich": {
+      "brand_name": "Elmich",
+      "official_shop_ids": ["88201679"],
+      "official_shop_usernames": ["elmich_official_store", "elmich.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Bear": {
+      "brand_name": "Bear",
+      "official_shop_ids": ["231554911"],
+      "official_shop_usernames": ["bear_official_store", "bearvietnam.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Philips": {
+      "brand_name": "Philips",
+      "official_shop_ids": ["57598284"],
+      "official_shop_usernames": ["philips_official_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "HyperWork": {
+      "brand_name": "HyperWork",
+      "official_shop_ids": ["435689122"],
+      "official_shop_usernames": ["hyperwork.vn", "hyperwork_official"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Keychron": {
+      "brand_name": "Keychron",
+      "official_shop_ids": ["291847102"],
+      "official_shop_usernames": ["keychron_vietnam", "siliconz.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    }
+  }
+}

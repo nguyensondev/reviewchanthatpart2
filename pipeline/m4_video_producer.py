@@ -1,0 +1,1958 @@
+"""
+Module M4: 100% Autonomous 9:16 Video Producer — Layout B1 (`pipeline/m4_video_producer.py`).
+
+Responsibilities (Black-Box Contract):
+  1. Reads `data/m3_approved_scripts.json` plus any queued `SCRIPT_APPROVED` scripts in `data/video_registry.json`.
+  2. Enforces `DailyQuotaManager` limits:
+     - `MAX_VIDEOS_PER_DAY = 3` (max 3 videos per calendar day).
+     - `MIN_RENDER_COOLDOWN_SECONDS = 7200` (rest at least 2 hours after each rendered video).
+  3. Step M4.1: Official Brand Video Resolver & Downloader (`data/m4_video_cache/` & `data/brand_official_cache/`),
+     always stripping original audio (`-an`) and rejecting third-party watermarked clips.
+  4. Step M4.2: Dense 0.5s (`fps=2`) OpenCV Faceless & Caption-Free Action Selector (avoids frontal faces,
+     burned-in promotional text bands, and logo end-cards; prioritizes verified clean intervals).
+  5. Step M4.3: Dual-gender TikTok TTS (`BV074_streaming` Female & `BV075_streaming` Male) randomized
+     and balanced across daily videos, strictly locked to 1 voice per video (`single_voice_locked=True`),
+     with same-gender Edge-TTS fallback (`vi-VN-HoaiMyNeural` / `vi-VN-NamMinhNeural`).
+  6. Step M4.4: Layout `B1` Renderer:
+     - Single centered 16:9 product frame (`1080x608` at `y=656..1264`, zero-zoom, zero-crop) over a
+       `1080x1920` ambient blurred background of the exact same shot (`boxblur=16:2,eq=brightness=-0.10:saturation=0.9`),
+       without black bars.
+     - Opening Hook Title (`0..2s`): `Fontsize=64`, slide-up `200ms`, strictly `<= 30` characters.
+     - Subtitles: `Fontsize=36` (10% smaller than demo's 40) at `y=1380` with gold keyword highlights.
+     - PIL Rounded Graphic Cards in top zone (`y=310..360`): Spec Card (Beat 2), Honest Caveat Card with `⚠️` (Beat 4),
+       and Price + CTA Card (Beat 5), plus `6px` top progress bar.
+     - Upbeat copyright-free BGM (1 of 4 tracks in `assets/bgm/` picked at random), sidechain-ducked under
+       voiceover at subtle low volume + subtle `whoosh`/`pop` SFX, normalized to `-14 LUFS`.
+  7. Updates `data/video_registry.json` (`status = "RENDERED"`, never `"PUBLISHED"`) and updates
+     `data/sku_registry.json` (`has_solo_video` / `has_combo_video` -> `RETIRED_EXHAUSTED` when both True).
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import base64
+import datetime as dt
+import json
+import random
+import re
+import shutil
+import subprocess
+import time
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Literal, Optional, Tuple
+
+import cv2
+import edge_tts
+import yt_dlp
+from PIL import Image, ImageDraw, ImageFont
+
+from pipeline.bgm_library import ensure_bgm_library, pick_random_bgm_track
+from pipeline.brand_video_gate import OfficialBrandVideoGate
+from pipeline.core_resilience import (
+    MacOSLegacyRuntime,
+    StorageGarbageCollector,
+    atomic_write_json,
+    atomic_write_text,
+    safe_load_json,
+)
+from pipeline.daily_quota import (
+    MAX_VIDEOS_PER_DAY,
+    MIN_RENDER_COOLDOWN_SECONDS,
+    DailyQuotaManager,
+)
+from pipeline.schemas_m1_5 import normalize_sku_key
+from pipeline.schemas_m3 import AuditedBeatSegment, AuditedScriptItem, M3ApprovedScriptsOutput
+from pipeline.schemas_m4 import (
+    M4ProductionOutput,
+    RenderedVideoItem,
+    SocialPostPack,
+    SubShotClauseItem,
+)
+from pipeline.shared_utils import enforce_short_hook_title
+from pipeline.sku_registry import SKURegistryManager
+from pipeline.video_registry import VideoRegistryManager
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+INPUT_M3_PATH = DATA_DIR / "m3_approved_scripts.json"
+OUTPUT_M4_JSON_PATH = DATA_DIR / "m4_production_output.json"
+VIDEO_CACHE_DIR = DATA_DIR / "m4_video_cache"
+BRAND_OFFICIAL_CACHE_DIR = DATA_DIR / "brand_official_cache"
+WORK_DIR = DATA_DIR / "m4_work"
+OUTPUT_VIDEOS_DIR = PROJECT_ROOT / "output" / "videos"
+BGM_DIR = PROJECT_ROOT / "assets" / "bgm"
+
+FONT_BOLD_PATH = MacOSLegacyRuntime.resolve_font_path(bold=True)
+FONT_REG_PATH = MacOSLegacyRuntime.resolve_font_path(bold=False)
+FFMPEG_THREADS = str(MacOSLegacyRuntime.optimal_ffmpeg_threads())
+MAX_CONTINUOUS_SHOT_SEC = 3.6
+
+TIKTOK_TTS_API_URL = "https://ottsy.weilbyte.dev/api/generation"
+VOICE_POOL: List[Tuple[str, Literal["FEMALE", "MALE"], str]] = [
+    ("BV074_streaming", "FEMALE", "vi-VN-HoaiMyNeural"),
+    ("BV075_streaming", "MALE", "vi-VN-NamMinhNeural"),
+]
+VOICE_RATE = "+10%"
+
+_HIGHLIGHT_PAT = re.compile(
+    r"(\b(?:\d+(?:[.,]\d+)?(?:\s*x\s*\d+)?\s*(?:k|tr|ml|mm|cm|g|kg|W|V|độ|DPI|K|Ra\d+)|"
+    r"Inox\s*\d+|USB[-\s]*C|Type[-\s]*C|Logi\s*Bolt|SmartWheel|LED|"
+    r"Baseus|i-wok2|Logitech|Lift\s*Vertical|Tanita|KD-\d+|Xiaomi|Ugreen|Anker|Lock&Lock|Inochi|OEM)\b)",
+    flags=re.IGNORECASE,
+)
+
+
+@dataclass
+class SampledFrameMeta:
+    timestamp: float
+    has_face: bool
+    has_caption_or_card: bool
+    face_ratio: float
+    edge_density: float
+    sharpness: float
+    std_luma: float
+
+
+@dataclass
+class VideoScanSummary:
+    video_id: str
+    path: Path
+    width: int
+    height: int
+    duration_sec: float
+    samples: List[SampledFrameMeta]
+    verified_clean_intervals: List[Tuple[float, float]] = field(default_factory=list)
+
+
+def _run_cmd(cmd: List[str], cwd: Optional[Path] = None) -> str:
+    res = subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"Command failed: {' '.join(cmd)[:400]}\n{res.stderr[-2500:]}")
+    return res.stdout
+
+
+def _probe_media_info(file_path: Path) -> Dict[str, float]:
+    out = _run_cmd(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,codec_name:format=duration",
+            "-of",
+            "json",
+            str(file_path),
+        ]
+    )
+    data = json.loads(out)
+    streams = data.get("streams") or []
+    fmt = data.get("format") or {}
+    w = int(streams[0].get("width", 0)) if streams else 0
+    h = int(streams[0].get("height", 0)) if streams else 0
+    dur = float(fmt.get("duration", 0.0) or 0.0)
+    return {"width": w, "height": h, "duration": dur}
+
+
+def _get_audio_duration(file_path: Path) -> float:
+    out = _run_cmd(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(file_path),
+        ]
+    )
+    return float(out.strip())
+
+
+def _format_ass_time(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h}:{m:02d}:{s:05.2f}"
+
+
+def _highlight_ass_keywords(text: str) -> str:
+    """Highlight numeric specs and brand/model tokens in gold while keeping neutral white body."""
+    gold = r"{\c&H0034C4FF&}"
+    white = r"{\c&H00FFFFFF&}"
+    escaped = text.replace("{", "(").replace("}", ")")
+    return _HIGHLIGHT_PAT.sub(lambda m: f"{gold}{m.group(1)}{white}", escaped)
+
+
+def _split_aligned_clauses(tts_text: str, sub_text: str) -> List[Tuple[str, str]]:
+    """
+    Split a beat's (tts_voiceover_vi, subtitle_text_vi) cleanly into 2 aligned clauses (~3.0-5.0s each)
+    so each beat gets 2 distinct visual cuts and balanced readable subtitles.
+    """
+    tts = " ".join(tts_text.strip().split())
+    sub = " ".join(sub_text.strip().split())
+    if len(tts.split()) <= 14:
+        return [(tts.rstrip(",;:"), sub.rstrip(",;:"))]
+
+    sep_re = re.compile(r"[.!?;:,]\s+")
+    tts_seps = list(sep_re.finditer(tts))
+    sub_seps = list(sep_re.finditer(sub))
+
+    mid_candidates = [
+        (idx, m)
+        for idx, m in enumerate(tts_seps)
+        if 0.25 <= (m.end() / max(1, len(tts))) <= 0.78
+    ]
+    if mid_candidates:
+        best_idx, best_m = min(
+            mid_candidates,
+            key=lambda pair: abs((pair[1].end() / max(1, len(tts))) - 0.50),
+        )
+        t1 = tts[: best_m.start() + 1].strip().rstrip(",;:")
+        t2 = tts[best_m.end() :].strip().rstrip(",;:")
+
+        if len(sub_seps) == len(tts_seps):
+            sm = sub_seps[best_idx]
+            s1 = sub[: sm.start() + 1].strip().rstrip(",;:")
+            s2 = sub[sm.end() :].strip().rstrip(",;:")
+        else:
+            target_ratio = best_m.end() / max(1, len(tts))
+            if sub_seps:
+                sm = min(
+                    sub_seps,
+                    key=lambda m: abs((m.end() / max(1, len(sub))) - target_ratio),
+                )
+                s1 = sub[: sm.start() + 1].strip().rstrip(",;:")
+                s2 = sub[sm.end() :].strip().rstrip(",;:")
+            else:
+                sw = sub.split()
+                s_mid = max(1, int(round(len(sw) * target_ratio)))
+                s1 = " ".join(sw[:s_mid])
+                s2 = " ".join(sw[s_mid:])
+
+        if t1 and t2 and s1 and s2:
+            return [(t1, s1), (t2, s2)]
+
+    tw = tts.split()
+    sw = sub.split()
+    t_mid = len(tw) // 2
+    s_mid = max(1, int(round(len(sw) * (t_mid / max(1, len(tw))))))
+    return [
+        (" ".join(tw[:t_mid]).rstrip(",;:"), " ".join(sw[:s_mid]).rstrip(",;:")),
+        (" ".join(tw[t_mid:]).rstrip(",;:"), " ".join(sw[s_mid:]).rstrip(",;:")),
+    ]
+
+
+def _split_utf8_chunks(text: str, max_bytes: int = 240) -> List[str]:
+    """Split text cleanly on punctuation or word boundaries without exceeding `max_bytes` UTF-8 bytes."""
+    clean = " ".join(text.strip().split())
+    if not clean:
+        return []
+    if len(clean.encode("utf-8")) <= max_bytes:
+        return [clean]
+
+    raw_pieces = re.split(r"(?<=[,;:])\s+", clean)
+    words_or_pieces: List[str] = []
+    for piece in raw_pieces:
+        if len(piece.encode("utf-8")) <= max_bytes:
+            words_or_pieces.append(piece)
+        else:
+            words_or_pieces.extend(piece.split())
+
+    chunks: List[str] = []
+    buf = ""
+    for unit in words_or_pieces:
+        cand = f"{buf} {unit}".strip() if buf else unit
+        if len(cand.encode("utf-8")) <= max_bytes:
+            buf = cand
+        else:
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            if len(unit.encode("utf-8")) <= max_bytes:
+                buf = unit
+            else:
+                sub_buf = ""
+                for ch in unit:
+                    if len((sub_buf + ch).encode("utf-8")) <= max_bytes:
+                        sub_buf += ch
+                    else:
+                        if sub_buf:
+                            chunks.append(sub_buf)
+                        sub_buf = ch
+                buf = sub_buf
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+def _choose_voice_for_video(
+    voices_used_today: List[str],
+    preferred_voice: Optional[str] = None,
+) -> List[Tuple[str, Literal["FEMALE", "MALE"], str]]:
+    """
+    Select ordered `(primary_tiktok_voice, gender, fallback_edge_voice)` candidates.
+    Randomizes between Female (`BV074_streaming`) and Male (`BV075_streaming`) while
+    ensuring gender balance across the 3 daily videos.
+    """
+    if preferred_voice == "BV075_streaming":
+        return [VOICE_POOL[1], VOICE_POOL[0]]
+    if preferred_voice == "BV074_streaming":
+        return [VOICE_POOL[0], VOICE_POOL[1]]
+
+    female_cnt = sum(1 for v in voices_used_today if v in ("BV074_streaming", "vi-VN-HoaiMyNeural"))
+    male_cnt = sum(1 for v in voices_used_today if v in ("BV075_streaming", "vi-VN-NamMinhNeural"))
+
+    if female_cnt > male_cnt:
+        return [VOICE_POOL[1], VOICE_POOL[0]]
+    if male_cnt > female_cnt:
+        return [VOICE_POOL[0], VOICE_POOL[1]]
+
+    pool = list(VOICE_POOL)
+    random.shuffle(pool)
+    return pool
+
+
+def _wrap_card_text(text: str, max_chars_per_line: int = 36, max_lines: int = 3) -> List[str]:
+    words = " ".join((text or "").strip().split()).split()
+    if not words:
+        return []
+    lines: List[str] = []
+    cur: List[str] = []
+    for w in words:
+        cand = " ".join(cur + [w])
+        if len(cand) <= max_chars_per_line:
+            cur.append(w)
+        else:
+            if cur:
+                lines.append(" ".join(cur))
+            cur = [w]
+            if len(lines) >= max_lines:
+                break
+    if cur and len(lines) < max_lines:
+        lines.append(" ".join(cur))
+    return lines[:max_lines]
+
+
+def _render_pil_rounded_card(
+    path: Path,
+    w: int,
+    h: int,
+    title: str,
+    lines: List[str],
+    accent: Tuple[int, int, int] = (255, 196, 52),
+) -> None:
+    """Render a translucent dark rounded overlay card (`spec_card` or `caveat_card`) with PIL."""
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(
+        [0, 0, w - 1, h - 1],
+        radius=28,
+        fill=(18, 20, 24, 218),
+        outline=(*accent, 255),
+        width=3,
+    )
+    d.rounded_rectangle([0, 0, 12, h - 1], radius=6, fill=(*accent, 255))
+    ft = ImageFont.truetype(FONT_BOLD_PATH, 40)
+    fl = ImageFont.truetype(FONT_REG_PATH, 32)
+    d.text((36, 22), title[:34], font=ft, fill=(*accent, 255))
+    y = 22 + 58
+    for ln in lines[:3]:
+        d.text((36, y), "• " + ln[:42], font=fl, fill=(242, 242, 242, 255))
+        y += 48
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def _render_pil_price_card(
+    path: Path,
+    price_label: str,
+    subtitle_label: str = "Link chính hãng ở giỏ hàng",
+) -> None:
+    """Render the Beat 5 Price + CTA rounded card with PIL."""
+    w, h = 660, 210
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(
+        [0, 0, w - 1, h - 1],
+        radius=30,
+        fill=(18, 20, 24, 225),
+        outline=(255, 196, 52, 255),
+        width=3,
+    )
+    d.text((36, 20), "Giá tham khảo", font=ImageFont.truetype(FONT_REG_PATH, 32), fill=(220, 220, 220, 255))
+    d.text((36, 64), price_label[:14], font=ImageFont.truetype(FONT_BOLD_PATH, 76), fill=(255, 196, 52, 255))
+    d.text((320, 102), subtitle_label[:24], font=ImageFont.truetype(FONT_BOLD_PATH, 28), fill=(255, 255, 255, 255))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def _build_sfx_files(work_dir: Path) -> Tuple[Path, Path]:
+    """Synthesize 100% copyright-free subtle `whoosh.wav` and `pop.wav` SFX via FFmpeg lavfi."""
+    whoosh = work_dir / "sfx_whoosh.wav"
+    pop = work_dir / "sfx_pop.wav"
+    if not whoosh.exists() or whoosh.stat().st_size < 1000:
+        _run_cmd(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "anoisesrc=color=pink:d=0.42:a=0.6",
+                "-af",
+                "highpass=f=500,lowpass=f=5000,afade=t=in:d=0.18,afade=t=out:st=0.2:d=0.22",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                str(whoosh),
+            ]
+        )
+    if not pop.exists() or pop.stat().st_size < 1000:
+        _run_cmd(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=f=880:d=0.09",
+                "-af",
+                "afade=t=out:st=0.01:d=0.08",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                str(pop),
+            ]
+        )
+    return whoosh, pop
+
+
+class M4VideoProducerEngine:
+    """Renders M3-approved scripts into Layout B1 9:16 MP4 videos under daily quota & 2h cooldown limits."""
+
+    def __init__(
+        self,
+        cache_dir: Path = VIDEO_CACHE_DIR,
+        brand_cache_dir: Path = BRAND_OFFICIAL_CACHE_DIR,
+        work_dir: Path = WORK_DIR,
+        output_dir: Path = OUTPUT_VIDEOS_DIR,
+        bgm_dir: Path = BGM_DIR,
+    ) -> None:
+        self.cache_dir = cache_dir
+        self.brand_cache_dir = brand_cache_dir
+        self.work_dir = work_dir
+        self.output_dir = output_dir
+        self.bgm_dir = bgm_dir
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.brand_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        ensure_bgm_library(self.bgm_dir)
+        self.brand_gate = OfficialBrandVideoGate()
+        self.video_registry = VideoRegistryManager()
+        self.sku_registry = SKURegistryManager()
+        self._scan_cache: Dict[str, VideoScanSummary] = {}
+
+    def _ensure_source_video(self, video_id: str, url: str) -> Optional[Path]:
+        """Step M4.1: Locate or download official brand YouTube footage (<= 1080p MP4)."""
+        for folder in (self.brand_cache_dir, self.cache_dir):
+            for ext in ("mp4", "mkv", "webm"):
+                existing = folder / f"{video_id}.{ext}"
+                if existing.exists() and existing.stat().st_size > 100_000:
+                    try:
+                        info = _probe_media_info(existing)
+                        if info["width"] > 0 and info["duration"] > 5.0:
+                            if folder != self.cache_dir:
+                                dst = self.cache_dir / existing.name
+                                if not dst.exists():
+                                    shutil.copy2(existing, dst)
+                            return existing
+                    except Exception:
+                        pass
+
+        print(f"[M4.1] Downloading video-only official brand clip {video_id} ({url})...", flush=True)
+        raw_dl_tmpl = str(self.cache_dir / f"{video_id}.raw.%(ext)s")
+        ydl_opts = {
+            "format": "bestvideo[height<=720][ext=mp4]/best[height<=720][ext=mp4]/best[height<=720]/best",
+            "outtmpl": raw_dl_tmpl,
+            "merge_output_format": "mp4",
+            "quiet": True,
+            "no_warnings": True,
+            "socket_timeout": 15,
+            "retries": 2,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+        except Exception as exc:
+            print(f"[M4.1] Warning: failed to download {video_id}: {exc}", flush=True)
+            return None
+
+        muted_target = self.cache_dir / f"{video_id}.mp4"
+        for ext in ("mp4", "mkv", "webm"):
+            raw_cand = self.cache_dir / f"{video_id}.raw.{ext}"
+            if raw_cand.exists() and raw_cand.stat().st_size > 100_000:
+                tmp_muted = self.cache_dir / f"{video_id}.muted.tmp.mp4"
+                try:
+                    _run_cmd(
+                        [
+                            "ffmpeg",
+                            "-y",
+                            "-threads",
+                            FFMPEG_THREADS,
+                            "-i",
+                            str(raw_cand),
+                            "-c:v",
+                            "copy",
+                            "-an",
+                            str(tmp_muted),
+                        ]
+                    )
+                    tmp_muted.replace(muted_target)
+                    raw_cand.unlink(missing_ok=True)
+                    return muted_target
+                except Exception:
+                    tmp_muted.unlink(missing_ok=True)
+                    raw_cand.replace(muted_target)
+                    return muted_target
+        return None
+
+    def _scan_video_faceless(self, video_id: str, video_path: Path) -> VideoScanSummary:
+        """
+        Step M4.2: Low-RAM Sequential 0.5s (`fps=2`) OpenCV scan with persistent `.scan.json` sidecar cache.
+        """
+        if video_id in self._scan_cache:
+            return self._scan_cache[video_id]
+
+        verified_intervals = self.brand_gate.get_verified_clean_intervals(video_id)
+        sidecar_path = self.cache_dir / f"{video_id}.scan.json"
+        if sidecar_path.exists():
+            cached_json = safe_load_json(sidecar_path, lambda: None)
+            if isinstance(cached_json, dict) and cached_json.get("samples"):
+                try:
+                    summary = VideoScanSummary(
+                        video_id=video_id,
+                        path=video_path,
+                        width=int(cached_json["width"]),
+                        height=int(cached_json["height"]),
+                        duration_sec=float(cached_json["duration_sec"]),
+                        samples=[SampledFrameMeta(**s) for s in cached_json["samples"]],
+                        verified_clean_intervals=verified_intervals,
+                    )
+                    self._scan_cache[video_id] = summary
+                    return summary
+                except Exception:
+                    pass
+
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+
+        cap = cv2.VideoCapture(str(video_path))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1280)
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 720)
+        duration = float(frame_count / fps) if fps > 0 and frame_count > 0 else 0.0
+        if duration <= 0.0:
+            duration = _probe_media_info(video_path)["duration"]
+
+        start_bound = 0.0 if verified_intervals else min(max(2.0, 0.08 * duration), max(0.0, duration - 6.0))
+        end_bound = max(start_bound + 2.0, duration - 1.5 if verified_intervals else min(duration - 2.5, 0.90 * duration))
+
+        samples: List[SampledFrameMeta] = []
+        step_frames = max(1, int(round(fps * 0.5)))
+        frame_idx = 0
+        max_frames = int((end_bound + 1.0) * fps) + 10
+
+        while frame_idx <= max_frames:
+            grabbed = cap.grab()
+            if not grabbed:
+                break
+            cur_t = frame_idx / max(1.0, fps)
+            if cur_t >= start_bound and (frame_idx % step_frames == 0) and cur_t <= end_bound:
+                ok, frame = cap.retrieve()
+                if ok and frame is not None:
+                    fh, fw = frame.shape[:2]
+                    target_w = 320
+                    scale = target_w / max(1, fw)
+                    small_h = max(1, int(fh * scale))
+                    small = cv2.resize(frame, (target_w, small_h))
+                    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
+                    faces = face_cascade.detectMultiScale(
+                        gray, scaleFactor=1.12, minNeighbors=4, minSize=(22, 22)
+                    )
+                    frame_area = float(target_w * small_h)
+                    max_face_ratio = 0.0
+                    if len(faces) > 0:
+                        max_face_ratio = max(float(w_f * h_f) / frame_area for (_, _, w_f, h_f) in faces)
+
+                    mean_luma = float(gray.mean())
+                    std_luma = float(gray.std())
+                    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                    edges = cv2.Canny(gray, 110, 210)
+                    edge_density = float((edges > 0).mean())
+
+                    in_verified_clean = any(a <= cur_t <= b for a, b in verified_intervals)
+                    if verified_intervals:
+                        has_caption_or_card = not in_verified_clean
+                        has_face = (not in_verified_clean) and (max_face_ratio > 0.02)
+                    else:
+                        has_caption_or_card = (
+                            mean_luma < 20.0
+                            or mean_luma > 232.0
+                            or std_luma < 16.0
+                            or edge_density > 0.135
+                        )
+                        has_face = max_face_ratio > 0.022
+
+                    samples.append(
+                        SampledFrameMeta(
+                            timestamp=round(cur_t, 2),
+                            has_face=has_face,
+                            has_caption_or_card=has_caption_or_card,
+                            face_ratio=round(max_face_ratio, 4),
+                            edge_density=round(edge_density, 4),
+                            sharpness=round(sharpness, 2),
+                            std_luma=round(std_luma, 2),
+                        )
+                    )
+            frame_idx += 1
+
+        cap.release()
+        summary = VideoScanSummary(
+            video_id=video_id,
+            path=video_path,
+            width=width,
+            height=height,
+            duration_sec=duration,
+            samples=samples,
+            verified_clean_intervals=verified_intervals,
+        )
+        self._scan_cache[video_id] = summary
+        try:
+            atomic_write_json(
+                sidecar_path,
+                {
+                    "video_id": video_id,
+                    "width": width,
+                    "height": height,
+                    "duration_sec": duration,
+                    "samples": [s.__dict__ for s in samples],
+                },
+                keep_backup=False,
+            )
+        except Exception:
+            pass
+        clean_cnt = sum(1 for s in samples if not s.has_face and not s.has_caption_or_card)
+        print(
+            f"[M4.2] Sequential-scanned {video_id} ({width}x{height}, {duration:.1f}s @ 0.5s step): "
+            f"{clean_cnt}/{len(samples)} clean (face-free & caption-free).",
+            flush=True,
+        )
+        return summary
+
+    def _pick_faceless_window(
+        self,
+        summary: VideoScanSummary,
+        target_dur: float,
+        used_windows: Dict[str, List[Tuple[float, float]]],
+    ) -> Tuple[float, float, bool, float]:
+        """
+        Select a clean, caption-free, face-free segment `[start_s, end_s]` for a clause.
+        If `summary.verified_clean_intervals` is populated, cycles cleanly through those
+        studio-verified intervals without overlapping until all intervals have been used.
+        """
+        existing = used_windows.setdefault(summary.video_id, [])
+
+        if summary.verified_clean_intervals:
+            # Prefer unused verified clean intervals first
+            for allow_reuse in (False, True):
+                for a, b in summary.verified_clean_intervals:
+                    iv_len = b - a
+                    if iv_len < 1.6:
+                        continue
+                    already_used = any(abs(a - u_a) < 0.4 for u_a, _ in existing)
+                    if already_used and not allow_reuse:
+                        continue
+                    # Take up to target_dur (or full clean interval if shorter; gentle slow-mo <= 1.35x handles the rest)
+                    take_len = min(iv_len, max(2.0, target_dur))
+                    st = round(a, 2)
+                    et = round(a + take_len, 2)
+                    existing.append((st, et))
+                    return st, et, True, 180.0
+
+        win_len = min(max(target_dur * 0.82, 2.4), max(2.4, summary.duration_sec - 2.0))
+        candidates: List[Tuple[float, bool, bool, float, float]] = []
+        for s in summary.samples:
+            st = s.timestamp
+            et = st + win_len
+            if et > summary.duration_sec - 1.0:
+                continue
+            inner = [x for x in summary.samples if st <= x.timestamp <= et]
+            any_face = any(x.has_face for x in inner) or s.has_face
+            any_cap = any(x.has_caption_or_card for x in inner) or s.has_caption_or_card
+            avg_sharp = sum(x.sharpness for x in inner) / len(inner) if inner else s.sharpness
+            avg_std = sum(x.std_luma for x in inner) / len(inner) if inner else s.std_luma
+            if avg_std < 14.0:
+                continue
+            candidates.append((st, any_face, any_cap, avg_sharp, s.face_ratio))
+
+        def _overlaps(st: float, et: float, pad: float) -> bool:
+            for u_st, u_et in existing:
+                if not (et + pad <= u_st or st - pad >= u_et):
+                    return True
+            return False
+
+        for pad, req_clean in [(4.0, True), (1.5, True), (0.5, False), (0.0, False)]:
+            pool = [
+                c
+                for c in candidates
+                if (not req_clean or (not c[1] and not c[2])) and not _overlaps(c[0], c[0] + win_len, pad)
+            ]
+            if pool:
+                best = sorted(pool, key=lambda x: (x[1], x[2], x[4], -x[3]))[0]
+                st = round(best[0], 2)
+                et = round(min(st + win_len, summary.duration_sec - 0.5), 2)
+                existing.append((st, et))
+                return st, et, (not best[1]), round(best[3], 2)
+
+        fallback_st = round(min(5.0, max(0.0, summary.duration_sec * 0.18)), 2)
+        fallback_et = round(min(fallback_st + win_len, max(fallback_st + 2.0, summary.duration_sec - 0.5)), 2)
+        existing.append((fallback_st, fallback_et))
+        return fallback_st, fallback_et, True, 120.0
+
+    async def _synth_clause_with_locked_voice(
+        self,
+        text: str,
+        out_mp3: Path,
+        out_wav: Path,
+        locked_voice: str,
+    ) -> float:
+        """Step M4.3: Synthesize one clause using ONLY `locked_voice` (strict 1-voice-per-video lock)."""
+        if out_wav.exists() and out_wav.stat().st_size > 1000:
+            return _get_audio_duration(out_wav)
+        clean_text = text.strip().rstrip(",;:")
+        if clean_text and clean_text[-1] not in ".!?":
+            clean_text += "."
+
+        tmp_mp3 = out_mp3.with_suffix(".tmp.mp3")
+        tmp_mp3.unlink(missing_ok=True)
+        atempo_prefix = ""
+
+        if locked_voice in ("BV074_streaming", "BV075_streaming"):
+            chunks = _split_utf8_chunks(clean_text, max_bytes=240)
+            chunk_mp3s: List[Path] = []
+            try:
+                for ch_idx, chunk in enumerate(chunks, start=1):
+                    backoff_secs = [0.8, 1.8, 3.5, 6.0, 10.0]
+                    ch_path = out_mp3.with_name(f"{out_mp3.stem}_p{ch_idx:02d}.mp3")
+                    ch_tmp = ch_path.with_suffix(".tmp.mp3")
+                    ch_ok = False
+                    last_exc: Optional[Exception] = None
+
+                    def _call_tiktok(c_text: str = chunk) -> bytes:
+                        payload = json.dumps({"text": c_text, "voice": locked_voice}).encode("utf-8")
+                        req = urllib.request.Request(
+                            TIKTOK_TTS_API_URL,
+                            data=payload,
+                            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                            method="POST",
+                        )
+                        with urllib.request.urlopen(req, timeout=15) as resp:
+                            body = json.loads(resp.read().decode("utf-8"))
+                        if not body.get("success") or not body.get("data"):
+                            raise RuntimeError(f"TikTok TTS unsuccessful response: {body}")
+                        return base64.b64decode(body["data"])
+
+                    for attempt, wait_s in enumerate(backoff_secs, start=1):
+                        ch_tmp.unlink(missing_ok=True)
+                        try:
+                            mp3_bytes = await asyncio.to_thread(_call_tiktok)
+                            if len(mp3_bytes) > 500:
+                                ch_tmp.write_bytes(mp3_bytes)
+                                ch_tmp.replace(ch_path)
+                                chunk_mp3s.append(ch_path)
+                                ch_ok = True
+                                await asyncio.sleep(0.22)
+                                break
+                        except Exception as exc:
+                            last_exc = exc
+                            print(
+                                f"  [TikTok TTS retry {attempt}/{len(backoff_secs)}] "
+                                f"voice={locked_voice} chunk={chunk[:28]!r} ({exc}); cooling {wait_s:.1f}s",
+                                flush=True,
+                            )
+                        ch_tmp.unlink(missing_ok=True)
+                        if attempt < len(backoff_secs):
+                            await asyncio.sleep(wait_s)
+
+                    if not ch_ok:
+                        raise RuntimeError(
+                            f"TikTok TTS ({locked_voice}) failed on chunk '{chunk[:40]}' after "
+                            f"{len(backoff_secs)} attempts: {last_exc}"
+                        )
+
+                if len(chunk_mp3s) == 1:
+                    chunk_mp3s[0].replace(out_mp3)
+                else:
+                    list_txt = out_mp3.with_suffix(".parts.txt")
+                    list_txt.write_text(
+                        "\n".join(f"file '{p.name}'" for p in chunk_mp3s),
+                        encoding="utf-8",
+                    )
+                    try:
+                        _run_cmd(
+                            [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                list_txt.name,
+                                "-c:a",
+                                "libmp3lame",
+                                "-b:a",
+                                "64k",
+                                str(tmp_mp3),
+                            ],
+                            cwd=out_mp3.parent,
+                        )
+                        tmp_mp3.replace(out_mp3)
+                    finally:
+                        list_txt.unlink(missing_ok=True)
+                        for p in chunk_mp3s:
+                            p.unlink(missing_ok=True)
+
+                atempo_prefix = "atempo=1.05,"
+            except Exception:
+                tmp_mp3.unlink(missing_ok=True)
+                for p in chunk_mp3s:
+                    p.unlink(missing_ok=True)
+                raise
+
+        elif locked_voice.startswith("vi-VN-"):
+            backoff_secs = [1.5, 4.0, 8.0, 12.0]
+            synth_ok = False
+            last_exc = None
+            for attempt, wait_s in enumerate(backoff_secs, start=1):
+                tmp_mp3.unlink(missing_ok=True)
+                try:
+                    comm = edge_tts.Communicate(text=clean_text, voice=locked_voice, rate=VOICE_RATE)
+                    await comm.save(str(tmp_mp3))
+                    if tmp_mp3.exists() and tmp_mp3.stat().st_size > 500:
+                        tmp_mp3.replace(out_mp3)
+                        synth_ok = True
+                        await asyncio.sleep(0.6)
+                        break
+                except Exception as exc:
+                    last_exc = exc
+                    print(
+                        f"  [Edge TTS retry {attempt}/{len(backoff_secs)}] voice={locked_voice} "
+                        f"{clean_text[:28]}... ({exc}); cooling {wait_s:.1f}s",
+                        flush=True,
+                    )
+                tmp_mp3.unlink(missing_ok=True)
+                if attempt < len(backoff_secs):
+                    await asyncio.sleep(wait_s)
+
+            if not synth_ok or not out_mp3.exists() or out_mp3.stat().st_size <= 500:
+                out_mp3.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Locked voice {locked_voice} failed for clause '{clean_text[:60]}': {last_exc}"
+                )
+        else:
+            raise ValueError(f"Unsupported locked TTS voice: {locked_voice}")
+
+        _run_cmd(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(out_mp3),
+                "-af",
+                f"{atempo_prefix}silenceremove=start_periods=1:start_silence=0.03:start_threshold=-45dB,"
+                "areverse,silenceremove=start_periods=1:start_silence=0.05:start_threshold=-45dB,"
+                "areverse,apad=pad_dur=0.08",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                str(out_wav),
+            ]
+        )
+        return _get_audio_duration(out_wav)
+
+    def _write_ass_file_b1(
+        self,
+        ass_path: Path,
+        timed_subtitles: List[Tuple[float, float, str]],
+        hook_title_short_vi: str,
+        hook_end_sec: float,
+    ) -> None:
+        """
+        Write Layout B1 ASS file:
+          - Style `Sub`: `Fontsize=36` (10% smaller than demo's 40), centered at `y=1380` with `120ms` fade.
+          - Style `Hook`: `Fontsize=64`, slide-up `200ms` at `y=560`, strictly `<= 30` chars (`0..hook_end_sec`).
+        """
+        short_hook = enforce_short_hook_title(hook_title_short_vi, max_chars=30).upper()
+        safe_hook = short_hook.replace("{", "(").replace("}", ")")
+
+        header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Sub,Arial,36,&H00FFFFFF,&H000000FF,&H00101010,&H99000000,-1,0,0,0,100,100,0.3,0,1,3.0,1.2,5,70,70,0,1
+Style: Hook,Arial,64,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,0.5,0,1,4.0,2.0,5,60,60,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        lines = [header]
+        h_end = min(max(1.8, hook_end_sec), 3.2)
+        lines.append(
+            f"Dialogue: 3,{_format_ass_time(0.05)},{_format_ass_time(h_end)},Hook,,0,0,0,,"
+            f"{{\\move(540,590,540,560,0,220)\\fad(200,150)\\c&H0034C4FF&}}{safe_hook}"
+        )
+        for st, et, stxt in timed_subtitles:
+            lines.append(
+                f"Dialogue: 2,{_format_ass_time(st)},{_format_ass_time(et)},Sub,,0,0,0,,"
+                f"{{\\pos(540,1380)\\fad(120,80)}}{stxt}"
+            )
+        ass_path.write_text("\n".join(lines), encoding="utf-8")
+
+    def _render_segment_layout_b1(
+        self,
+        summary: VideoScanSummary,
+        start_sec: float,
+        end_sec: float,
+        target_dur: float,
+        out_mp4: Path,
+        layout_mode: Literal["B1", "cinema", "fullscreen"] = "B1",
+    ) -> None:
+        """
+        Step M4.4a: Render segment in approved Layout B1:
+          - If source is vertical (`height > width`) or `layout_mode == "fullscreen"`: full `1080x1920`.
+          - Otherwise (16:9 studio footage):
+            * Background (`1080x1920`): exact same shot scaled to `270x480`, `boxblur=16:2`, scaled to `1080x1920`,
+              `eq=brightness=-0.10:saturation=0.9` (NO black `drawbox` bars).
+            * Foreground (`1080x608` at `y=656`): zero-zoom, zero-crop `scale=1080:608:flags=lanczos`.
+        """
+        if out_mp4.exists() and out_mp4.stat().st_size > 10_000:
+            try:
+                cached_dur = _probe_media_info(out_mp4)["duration"]
+                if abs(cached_dur - target_dur) < 0.25:
+                    return
+            except Exception:
+                pass
+
+        src_dur = max(0.5, end_sec - start_sec)
+        pts_factor = max(1.0, target_dur / src_dur)
+        take_dur = min(src_dur, target_dur)
+        base_chain = (
+            f"trim=start={start_sec:.3f}:end={start_sec + take_dur:.3f},setpts=PTS-STARTPTS,"
+            f"setpts={pts_factor:.5f}*PTS,fps=30"
+        )
+
+        if layout_mode == "fullscreen" or summary.height > summary.width:
+            vf = (
+                f"[0:v]{base_chain},setsar=1:1,"
+                f"scale=1080:1920:flags=lanczos:force_original_aspect_ratio=decrease,"
+                f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
+                f"setsar=1:1,setdar=9/16,eq=contrast=1.03:saturation=1.05,"
+                f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
+            )
+        else:
+            vf = (
+                f"[0:v]{base_chain},split=2[vbg][vfg];"
+                f"[vbg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
+                f"boxblur=16:2,scale=1080:1920:flags=bilinear,"
+                f"eq=brightness=-0.10:saturation=0.9,setsar=1:1[bg];"
+                f"[vfg]scale=1080:608:flags=lanczos,setsar=1:1,"
+                f"eq=contrast=1.03:saturation=1.06[fg];"
+                f"[bg][fg]overlay=x=0:y=656,setsar=1:1,setdar=9/16,"
+                f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
+            )
+
+        tmp_slice = out_mp4.with_suffix(".tmp.mp4")
+        tmp_slice.unlink(missing_ok=True)
+        try:
+            _run_cmd(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-threads",
+                    FFMPEG_THREADS,
+                    "-i",
+                    str(summary.path),
+                    "-filter_complex",
+                    vf,
+                    "-map",
+                    "[vout]",
+                    "-an",
+                    "-t",
+                    f"{target_dur:.3f}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "20",
+                    "-aspect",
+                    "9:16",
+                    str(tmp_slice),
+                ]
+            )
+            tmp_slice.replace(out_mp4)
+        finally:
+            tmp_slice.unlink(missing_ok=True)
+
+    def _build_social_pack(self, script: AuditedScriptItem, m3_data: M3ApprovedScriptsOutput) -> SocialPostPack:
+        links: Dict[str, str] = {}
+        offer_lines: List[str] = []
+        tags: List[str] = [
+            "#reviewcogia",
+            "#gocnhabep" if script.domain == "KITCHEN_TECH" else "#techsetup",
+            "#muagiachinhhang",
+        ]
+
+        for cid, offer in script.affiliate_offers_ready.items():
+            if offer and offer.short_link:
+                links[cid] = offer.short_link
+                offer_lines.append(f"• {offer.product_name[:55]}... 👉 {offer.short_link}")
+            else:
+                links[cid] = "(Chưa gắn link — tìm kiếm theo tên model chính hãng)"
+
+        caveat_lines = [
+            f"⚠️ Lưu ý thật ({c.brand} {c.model_code or ''}): {c.mandatory_caveat_mentioned_vi}".strip()
+            for c in script.verified_factual_claims
+        ]
+        for c in script.verified_factual_claims:
+            clean_brand = re.sub(r"[^a-zA-Z0-9]", "", c.brand)
+            if clean_brand:
+                tags.append(f"#{clean_brand}")
+            if c.model_code:
+                clean_model = re.sub(r"[^a-zA-Z0-9]", "", c.model_code)
+                if clean_model:
+                    tags.append(f"#{clean_model}")
+
+        caption_vi = (
+            f"{script.title_vi}\n\n"
+            f"{chr(10).join(caveat_lines)}\n\n"
+            "Xem chi tiết ưu/nhược điểm trong video trước khi xuống tiền nhé!"
+        )
+        pinned_comment = (
+            "Link sản phẩm chính hãng mình đã kiểm chứng thông số:\n"
+            + ("\n".join(offer_lines) if offer_lines else "(Đang cập nhật link chính hãng)")
+        )
+
+        return SocialPostPack(
+            title_vi=script.title_vi,
+            caption_vi=caption_vi,
+            hashtags=list(dict.fromkeys(tags)),
+            pinned_comment_affiliate_vi=pinned_comment,
+            affiliate_short_links=links,
+        )
+
+    def _resolve_official_clips_for_script(self, script: AuditedScriptItem) -> Dict[str, VideoScanSummary]:
+        """
+        Resolve and scan ONLY verified official brand videos for every SKU in `script`.
+        Never falls back to third-party shop or user review videos.
+        """
+        clip_summaries: Dict[str, VideoScanSummary] = {}
+        claims_by_cid = {c.candidate_id: c for c in script.verified_factual_claims}
+
+        # 1. Resolve curated/verified official videos for each primary SKU claim
+        for claim in script.verified_factual_claims:
+            official_clips = self.brand_gate.filter_and_resolve_official_clips(
+                brand=claim.brand,
+                model_code=claim.model_code,
+                candidate_id=claim.candidate_id,
+                raw_clips=[],
+            )
+            for oc in official_clips:
+                if oc.video_id not in clip_summaries:
+                    local_p = self._ensure_source_video(oc.video_id, oc.url)
+                    if local_p:
+                        clip_summaries[oc.video_id] = self._scan_video_faceless(oc.video_id, local_p)
+
+        # 2. Check beat clips (passing through OfficialBrandVideoGate)
+        for b in script.beats:
+            if b.source_youtube_clip:
+                claim = claims_by_cid.get(b.target_candidate_id) or (
+                    script.verified_factual_claims[0] if script.verified_factual_claims else None
+                )
+                brand = claim.brand if claim else ""
+                model_code = claim.model_code if claim else None
+                cand_id = claim.candidate_id if claim else b.target_candidate_id
+                verified_list = self.brand_gate.filter_and_resolve_official_clips(
+                    brand=brand,
+                    model_code=model_code,
+                    candidate_id=cand_id,
+                    raw_clips=[b.source_youtube_clip],
+                )
+                for vc in verified_list:
+                    b.source_youtube_clip = vc
+                    if vc.video_id not in clip_summaries:
+                        local_p = self._ensure_source_video(vc.video_id, vc.url)
+                        if local_p:
+                            clip_summaries[vc.video_id] = self._scan_video_faceless(vc.video_id, local_p)
+                    break
+
+        return clip_summaries
+
+    async def _produce_single_video_async(
+        self,
+        script: AuditedScriptItem,
+        m3_data: M3ApprovedScriptsOutput,
+        layout_mode: Literal["B1", "cinema", "fullscreen"],
+        voices_used_today: List[str],
+        preferred_voice: Optional[str] = None,
+    ) -> RenderedVideoItem:
+        seg_dir = self.work_dir / script.script_id
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        t_start_perf = time.perf_counter()
+        render_started_iso = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+        # 1. Ensure official brand source videos for this script are downloaded & dense-scanned
+        clip_summaries = self._resolve_official_clips_for_script(script)
+        if not clip_summaries:
+            raise RuntimeError(
+                f"No verified official brand videos available for script {script.script_id}"
+            )
+        summary_list = list(clip_summaries.values())
+        fallback_summary = summary_list[0]
+
+        # Map each candidate_id to its official video summary when possible
+        cand_to_summary: Dict[str, VideoScanSummary] = {}
+        for claim in script.verified_factual_claims:
+            off_clips = self.brand_gate.filter_and_resolve_official_clips(
+                brand=claim.brand,
+                model_code=claim.model_code,
+                candidate_id=claim.candidate_id,
+                raw_clips=[],
+            )
+            for oc in off_clips:
+                if oc.video_id in clip_summaries:
+                    cand_to_summary[claim.candidate_id] = clip_summaries[oc.video_id]
+                    break
+
+        # 2. Split every beat into short aligned clauses & synthesize voiceover with 1 locked voice
+        clause_specs: List[Tuple[AuditedBeatSegment, int, str, str, VideoScanSummary]] = []
+        clause_counter = 0
+        for b in sorted(script.beats, key=lambda x: x.beat_index):
+            summary = cand_to_summary.get(b.target_candidate_id)
+            if summary is None and b.source_youtube_clip and b.source_youtube_clip.video_id in clip_summaries:
+                summary = clip_summaries[b.source_youtube_clip.video_id]
+            if summary is None:
+                summary = summary_list[(b.beat_index - 1) % len(summary_list)]
+            pairs = _split_aligned_clauses(b.tts_voiceover_vi, b.subtitle_text_vi)
+            for tts_part, sub_part in pairs:
+                clause_counter += 1
+                clause_specs.append((b, clause_counter, tts_part, sub_part, summary))
+
+        voice_candidates = _choose_voice_for_video(voices_used_today, preferred_voice=preferred_voice)
+        sem = asyncio.Semaphore(1)
+        locked_voice: Optional[str] = None
+        locked_gender: Literal["FEMALE", "MALE"] = "FEMALE"
+        tts_map: Dict[int, Tuple[float, Path]] = {}
+
+        for primary_tiktok_voice, gender, fallback_edge in voice_candidates:
+            for candidate_voice in (primary_tiktok_voice, fallback_edge):
+                try:
+                    candidate_map: Dict[int, Tuple[float, Path]] = {}
+                    async with sem:
+                        for _, c_idx, tts_txt, _, _ in clause_specs:
+                            mp3_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.mp3"
+                            wav_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.wav"
+                            dur = await self._synth_clause_with_locked_voice(
+                                tts_txt,
+                                mp3_p,
+                                wav_p,
+                                locked_voice=candidate_voice,
+                            )
+                            candidate_map[c_idx] = (dur, wav_p)
+                    tts_map = candidate_map
+                    locked_voice = candidate_voice
+                    locked_gender = gender
+                    print(
+                        f"[M4.3] Voice locked for {script.script_id}: {locked_voice} ({locked_gender}) "
+                        f"[{len(clause_specs)}/{len(clause_specs)} clauses uniform]",
+                        flush=True,
+                    )
+                    break
+                except Exception as exc:
+                    print(
+                        f"[M4.3] Whole-video voice '{candidate_voice}' failed on {script.script_id}: {exc}. "
+                        f"Discarding partial clips to guarantee 1-voice uniformity...",
+                        flush=True,
+                    )
+                    for p in seg_dir.glob(f"c*_{candidate_voice}.*"):
+                        p.unlink(missing_ok=True)
+            if locked_voice and tts_map:
+                break
+
+        if not locked_voice or not tts_map:
+            raise RuntimeError(
+                f"Failed to synthesize locked single-voice track for {script.script_id}"
+            )
+
+        # 3. Pick non-overlapping clean official video sub-shots & render each Layout B1 slice
+        used_windows: Dict[str, List[Tuple[float, float]]] = {}
+        all_wavs: List[Path] = []
+        all_vids: List[Path] = []
+        timed_subtitles: List[Tuple[float, float, str]] = []
+        beat_spans: Dict[int, List[float]] = {}
+        sub_shots: List[SubShotClauseItem] = []
+
+        cursor_sec = 0.0
+        for b, c_idx, tts_part, sub_part, summary in clause_specs:
+            dur, wav_p = tts_map[c_idx]
+            all_wavs.append(wav_p)
+
+            vid_slice_path = seg_dir / f"v_{c_idx:02d}_B1_{locked_voice}.mp4"
+            if dur > MAX_CONTINUOUS_SHOT_SEC:
+                # Anti-Content-ID Visual Temporal Guard: split clauses > 3.6s into 2 distinct visual sub-cuts
+                d1 = round(dur * 0.5, 2)
+                d2 = round(dur - d1, 2)
+                st1, et1, ff1, sh1 = self._pick_faceless_window(summary, d1, used_windows)
+                st2, et2, ff2, sh2 = self._pick_faceless_window(summary, d2, used_windows)
+                p1 = seg_dir / f"v_{c_idx:02d}a_B1_{locked_voice}.mp4"
+                p2 = seg_dir / f"v_{c_idx:02d}b_B1_{locked_voice}.mp4"
+                self._render_segment_layout_b1(summary, st1, et1, d1, p1, layout_mode=layout_mode)
+                self._render_segment_layout_b1(summary, st2, et2, d2, p2, layout_mode=layout_mode)
+                if not (vid_slice_path.exists() and vid_slice_path.stat().st_size > 10_000):
+                    pair_txt = seg_dir / f"pair_{c_idx:02d}.txt"
+                    pair_txt.write_text(f"file '{p1.name}'\nfile '{p2.name}'\n", encoding="utf-8")
+                    tmp_pair = vid_slice_path.with_suffix(".tmp.mp4")
+                    try:
+                        _run_cmd(
+                            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", pair_txt.name, "-c", "copy", tmp_pair.name],
+                            cwd=seg_dir,
+                        )
+                        tmp_pair.replace(vid_slice_path)
+                    finally:
+                        pair_txt.unlink(missing_ok=True)
+                        tmp_pair.unlink(missing_ok=True)
+                st_vid, et_vid, face_free, sharp = st1, et2, (ff1 and ff2), round((sh1 + sh2) * 0.5, 2)
+            else:
+                st_vid, et_vid, face_free, sharp = self._pick_faceless_window(
+                    summary=summary,
+                    target_dur=dur,
+                    used_windows=used_windows,
+                )
+                self._render_segment_layout_b1(
+                    summary=summary,
+                    start_sec=st_vid,
+                    end_sec=et_vid,
+                    target_dur=dur,
+                    out_mp4=vid_slice_path,
+                    layout_mode=layout_mode,
+                )
+            all_vids.append(vid_slice_path)
+
+            timed_subtitles.append(
+                (cursor_sec, cursor_sec + dur, _highlight_ass_keywords(sub_part))
+            )
+            if b.beat_index not in beat_spans:
+                beat_spans[b.beat_index] = [cursor_sec, cursor_sec + dur]
+            else:
+                beat_spans[b.beat_index][1] = cursor_sec + dur
+            cursor_sec += dur
+
+            sub_shots.append(
+                SubShotClauseItem(
+                    clause_index=c_idx,
+                    beat_index=b.beat_index,
+                    source_video_id=summary.video_id,
+                    source_start_sec=st_vid,
+                    source_end_sec=et_vid,
+                    duration_sec=round(dur, 2),
+                    face_free_verified=face_free,
+                    caption_free_verified=True,
+                    sharpness_score=sharp,
+                    tts_text_vi=tts_part,
+                    subtitle_text_vi=sub_part,
+                )
+            )
+
+        total_dur = round(cursor_sec, 2)
+
+        # 4. Concat video slices & WAV voiceover
+        vid_list_txt = seg_dir / "vids_B1.txt"
+        vid_list_txt.write_text(
+            "\n".join(f"file '{p.name}'" for p in all_vids), encoding="utf-8"
+        )
+        concat_vid = seg_dir / "concat_video_B1.mp4"
+        _run_cmd(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", vid_list_txt.name, "-c", "copy", concat_vid.name],
+            cwd=seg_dir,
+        )
+
+        wav_list_txt = seg_dir / "wavs.txt"
+        wav_list_txt.write_text(
+            "\n".join(f"file '{p.name}'" for p in all_wavs), encoding="utf-8"
+        )
+        concat_voice = seg_dir / "concat_voice.wav"
+        _run_cmd(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", wav_list_txt.name, "-c", "copy", concat_voice.name],
+            cwd=seg_dir,
+        )
+
+        # 5. Generate PIL Rounded Graphic Cards (Beat 2 Spec Card, Beat 4 Caveat Card, Beat 5 Price Card)
+        primary_claim = script.verified_factual_claims[0] if script.verified_factual_claims else None
+        if len(script.verified_factual_claims) >= 2:
+            spec_title = " + ".join(
+                f"{c.brand} {c.model_code or ''}".strip() for c in script.verified_factual_claims[:2]
+            )
+            spec_lines = [
+                f"{c.brand} {c.model_code or ''}: ~{c.claimed_price_vnd // 1000}k"
+                for c in script.verified_factual_claims[:3]
+            ]
+            total_price_k = sum(c.claimed_price_vnd for c in script.verified_factual_claims) // 1000
+            price_str = f"~{total_price_k:,}k".replace(",", ".")
+            caveat_lines = _wrap_card_text(
+                "; ".join(c.mandatory_caveat_mentioned_vi for c in script.verified_factual_claims[:2]),
+                max_chars_per_line=38,
+                max_lines=3,
+            )
+        elif primary_claim:
+            spec_title = f"{primary_claim.brand} {primary_claim.model_code or ''}".strip()
+            spec_lines = [s[:40] for s in primary_claim.claimed_specs_mentioned[:3]] or ["Chính hãng kiểm chứng"]
+            price_k = max(1, primary_claim.claimed_price_vnd // 1000)
+            price_str = f"~{price_k:,}k".replace(",", ".")
+            caveat_lines = _wrap_card_text(
+                primary_claim.mandatory_caveat_mentioned_vi, max_chars_per_line=38, max_lines=3
+            )
+        else:
+            spec_title = script.title_vi[:26]
+            spec_lines = ["Thông số chuẩn nhà sản xuất"]
+            price_str = "Chính hãng"
+            caveat_lines = ["Xem kỹ lưu ý trước khi mua"]
+
+        spec_card_png = seg_dir / "card_spec.png"
+        caveat_card_png = seg_dir / "card_caveat.png"
+        price_card_png = seg_dir / "card_price.png"
+        _render_pil_rounded_card(spec_card_png, 760, 270, spec_title, spec_lines, accent=(255, 196, 52))
+        _render_pil_rounded_card(
+            caveat_card_png, 800, 260, "⚠️ Lưu ý thực tế", caveat_lines, accent=(255, 145, 48)
+        )
+        _render_pil_price_card(price_card_png, price_str, subtitle_label="Link ở giỏ hàng")
+
+        # 6. Write Layout B1 ASS subtitles (`Fontsize=36`, Hook `Fontsize=64` <= 30 chars)
+        hook_short = enforce_short_hook_title(
+            getattr(script, "hook_title_short_vi", "")
+            or (script.beats[0].on_screen_text_vi if script.beats else "")
+            or script.title_vi,
+            max_chars=30,
+        )
+        hook_end_s = min(2.4, beat_spans.get(1, [0.0, 2.2])[1])
+        ass_filename = "subs_B1.ass"
+        self._write_ass_file_b1(
+            seg_dir / ass_filename,
+            timed_subtitles=timed_subtitles,
+            hook_title_short_vi=hook_short,
+            hook_end_sec=hook_end_s,
+        )
+
+        # 7. Pick 1 random cheerful/upbeat BGM track & synthesize copyright-free SFX
+        bgm_track_path = pick_random_bgm_track(self.bgm_dir)
+        whoosh_wav, pop_wav = _build_sfx_files(self.work_dir)
+
+        b2_span = beat_spans.get(2, [min(4.5, total_dur * 0.2), min(9.5, total_dur * 0.4)])
+        b4_span = beat_spans.get(4, [min(16.0, total_dur * 0.62), min(22.0, total_dur * 0.82)])
+        b5_span = beat_spans.get(5, [min(22.5, total_dur * 0.83), total_dur - 0.1])
+
+        s2a, s2b = round(b2_span[0] + 0.15, 2), round(max(b2_span[0] + 1.2, b2_span[1] - 0.15), 2)
+        s4a, s4b = round(b4_span[0] + 0.15, 2), round(max(b4_span[0] + 1.2, b4_span[1] - 0.15), 2)
+        s5a, s5b = round(b5_span[0] + 0.10, 2), round(max(b5_span[0] + 1.0, total_dur - 0.10), 2)
+
+        whoosh_times = [round(b2_span[0], 2), round(b4_span[0], 2)]
+        pop_times = [s2a, s4a, s5a]
+
+        v_fc = [
+            f"[0:v]setsar=1:1,setdar=9/16[basev]",
+            f"[1:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
+            f"fade=t=in:st={s2a}:d=0.2:alpha=1,fade=t=out:st={max(s2a+0.2, s2b-0.2):.2f}:d=0.2:alpha=1[c_spec]",
+            f"[basev][c_spec]overlay=x='160-60*max(0\\,1-(t-{s2a})/0.2)':y=320:enable='between(t,{s2a},{s2b})'[v1]",
+            f"[2:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
+            f"fade=t=in:st={s4a}:d=0.2:alpha=1,fade=t=out:st={max(s4a+0.2, s4b-0.2):.2f}:d=0.2:alpha=1[c_cav]",
+            f"[v1][c_cav]overlay=x='140-60*max(0\\,1-(t-{s4a})/0.2)':y=325:enable='between(t,{s4a},{s4b})'[v2]",
+            f"[3:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
+            f"fade=t=in:st={s5a}:d=0.2:alpha=1[c_prc]",
+            f"[v2][c_prc]overlay=x='210-60*max(0\\,1-(t-{s5a})/0.2)':y=360:enable='between(t,{s5a},{s5b})'[v3]",
+            f"[v3]ass='{ass_filename}'[v4]",
+            f"color=c=0xFFC434:s=1080x6:d={total_dur:.3f}:r=30[pb]",
+            f"[v4][pb]overlay=x='-W+W*t/{total_dur:.3f}':y=0,setsar=1:1,setdar=9/16,format=yuv420p[vout]",
+        ]
+
+        fade_out_st = max(0.0, total_dur - 1.5)
+        a_fc = [
+            "[4:a]aresample=44100,volume=1.05,asplit=2[vo][vsc]",
+            f"[5:a]aresample=44100,atrim=0:{total_dur:.3f},afade=t=in:d=0.8,"
+            f"afade=t=out:st={fade_out_st:.3f}:d=1.5,volume=0.22[bgm]",
+            "[bgm][vsc]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[duck]",
+            f"[6:a]asplit={len(whoosh_times)}" + "".join(f"[wi{i}]" for i in range(len(whoosh_times))),
+            f"[7:a]asplit={len(pop_times)}" + "".join(f"[pi{i}]" for i in range(len(pop_times))),
+        ]
+        sfx_labels: List[str] = []
+        for i, wt in enumerate(whoosh_times):
+            ms = int(max(0.0, wt - 0.12) * 1000)
+            a_fc.append(f"[wi{i}]adelay={ms}|{ms},volume=0.10[w{i}]")
+            sfx_labels.append(f"[w{i}]")
+        for i, pt in enumerate(pop_times):
+            ms = int(max(0.0, pt) * 1000)
+            a_fc.append(f"[pi{i}]adelay={ms}|{ms},volume=0.09[p{i}]")
+            sfx_labels.append(f"[p{i}]")
+
+        a_fc.append(
+            f"[vo][duck]{''.join(sfx_labels)}amix=inputs={2 + len(sfx_labels)}:normalize=0:duration=first,"
+            f"apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f},"
+            f"loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
+        )
+
+        final_out = self.output_dir / f"{script.script_id}.mp4"
+        tmp_final_out = seg_dir / f"{script.script_id}.final.tmp.mp4"
+        tmp_final_out.unlink(missing_ok=True)
+        MacOSLegacyRuntime.apply_gentle_background_priority()
+
+        _run_cmd(
+            [
+                "ffmpeg",
+                "-y",
+                "-threads",
+                FFMPEG_THREADS,
+                "-i",
+                concat_vid.name,
+                "-i",
+                spec_card_png.name,
+                "-i",
+                caveat_card_png.name,
+                "-i",
+                price_card_png.name,
+                "-i",
+                concat_voice.name,
+                "-stream_loop",
+                "-1",
+                "-i",
+                str(bgm_track_path),
+                "-i",
+                str(whoosh_wav),
+                "-i",
+                str(pop_wav),
+                "-filter_complex",
+                ";".join(v_fc + a_fc),
+                "-map",
+                "[vout]",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "19",
+                "-aspect",
+                "9:16",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-ar",
+                "44100",
+                "-movflags",
+                "+faststart",
+                "-t",
+                f"{total_dur:.3f}",
+                str(tmp_final_out),
+            ],
+            cwd=seg_dir,
+        )
+
+        # Verify tmp_final_out integrity before atomic replace -> output/videos/<script_id>.mp4
+        info = _probe_media_info(tmp_final_out)
+        if int(info["width"]) != 1080 or int(info["height"]) != 1920 or info["duration"] < 10.0:
+            tmp_final_out.unlink(missing_ok=True)
+            raise RuntimeError(f"Rendered video failed integrity probe: {info}")
+        final_out.parent.mkdir(parents=True, exist_ok=True)
+        tmp_final_out.replace(final_out)
+
+        # Immediately reclaim scratch WAV/MP4 work space now that final MP4 is atomically saved
+        StorageGarbageCollector().cleanup_completed_work_dir(seg_dir)
+
+        render_elapsed_sec = round(time.perf_counter() - t_start_perf, 2)
+        render_finished_dt = dt.datetime.now().astimezone()
+        render_finished_iso = render_finished_dt.isoformat(timespec="seconds")
+        next_allowed_iso = (
+            render_finished_dt + dt.timedelta(seconds=MIN_RENDER_COOLDOWN_SECONDS)
+        ).isoformat(timespec="seconds")
+
+        unique_vids = list(dict.fromkeys(s.source_video_id for s in sub_shots))
+        social_pack = self._build_social_pack(script, m3_data)
+
+        print(
+            f"[M4.4] Rendered Layout B1 {final_out.name} ({int(info['width'])}x{int(info['height'])}, "
+            f"{info['duration']:.2f}s, voice={locked_voice}/{locked_gender}, bgm={bgm_track_path.name}, "
+            f"render_time={render_elapsed_sec:.1f}s)",
+            flush=True,
+        )
+
+        return RenderedVideoItem(
+            script_id=script.script_id,
+            script_format=script.script_format,
+            domain=script.domain,
+            category_id=script.category_id,
+            narrative_angle=script.narrative_angle,
+            title_vi=script.title_vi,
+            hook_title_short_vi=hook_short,
+            video_path=str(final_out),
+            video_status="RENDERED",
+            layout_mode="B1" if layout_mode != "fullscreen" else "fullscreen",
+            width=int(info["width"]),
+            height=int(info["height"]),
+            fps=30,
+            duration_sec=round(info["duration"], 2),
+            file_size_bytes=final_out.stat().st_size,
+            voice_name=locked_voice,
+            voice_gender=locked_gender,
+            single_voice_locked=True,
+            bgm_track=bgm_track_path.name,
+            render_started_at=render_started_iso,
+            render_finished_at=render_finished_iso,
+            render_duration_sec=render_elapsed_sec,
+            next_render_allowed_at=next_allowed_iso,
+            clauses_count=len(sub_shots),
+            unique_source_videos_used=unique_vids,
+            sub_shots=sub_shots,
+            social_post_pack=social_pack,
+        )
+
+    def _get_script_sku_keys(self, script: AuditedScriptItem) -> set[str]:
+        """Return all canonical SKU keys and candidate_ids referenced as primary SKUs in `script`."""
+        keys: set[str] = set()
+        for cid in script.primary_sku_ids:
+            keys.add(cid)
+            resolved = self.sku_registry.resolve_sku_key_by_candidate_id(cid)
+            if resolved:
+                keys.add(resolved)
+        for c in script.verified_factual_claims:
+            keys.add(c.candidate_id)
+            keys.add(normalize_sku_key(c.brand, c.model_code, c.candidate_id))
+        return keys
+
+    def _select_diverse_daily_scripts(
+        self,
+        candidates: List[AuditedScriptItem],
+        limit: int,
+        enforce_sku_cooldown: bool = True,
+        already_rendered_skus_today: Optional[set[str]] = None,
+    ) -> List[AuditedScriptItem]:
+        """
+        Select up to `limit` scripts maximizing:
+          1. Strict Zero SKU Overlap (within the same day AND across the 3-7 day SKU cooldown window
+             when `enforce_sku_cooldown=True`).
+          2. Domain harmony (`TECH_DESK` + `KITCHEN_TECH`), category uniqueness, and angle diversity.
+        """
+        if limit <= 0 or not candidates:
+            return []
+
+        remaining = candidates[:]
+        selected: List[AuditedScriptItem] = []
+        selected_domains: set[str] = set()
+        selected_cats: set[str] = set()
+        selected_skus: set[str] = set(already_rendered_skus_today or set())
+        selected_angles: set[str] = set()
+
+        while remaining and len(selected) < limit:
+            # Filter out any candidate whose SKUs are in 3-7d cooldown or already used in `selected_skus`
+            if enforce_sku_cooldown:
+                non_overlapping = [
+                    c
+                    for c in remaining
+                    if not (self._get_script_sku_keys(c) & selected_skus)
+                    and not any(self.sku_registry.is_in_cooldown(k) for k in self._get_script_sku_keys(c))
+                ]
+            else:
+                non_overlapping = remaining[:]
+
+            if not non_overlapping:
+                break
+
+            available_domains = {c.domain for c in non_overlapping}
+            missing_domains = available_domains - selected_domains
+
+            def _diversity_score(item: AuditedScriptItem) -> tuple[int, int, int, int]:
+                item_skus = self._get_script_sku_keys(item)
+                # Prefer scripts that don't block 2 other solo scripts in the same batch when 3 distinct solos exist
+                is_solo = item.script_format == "SINGLE_SKU_DEEP_DIVE"
+                return (
+                    1 if item.domain in missing_domains else 0,
+                    1 if item.category_id not in selected_cats else 0,
+                    1 if not (item_skus & selected_skus) else 0,
+                    1 if (item.narrative_angle not in selected_angles and is_solo) else 0,
+                )
+
+            best_item = max(non_overlapping, key=_diversity_score)
+            remaining.remove(best_item)
+            selected.append(best_item)
+            selected_domains.add(best_item.domain)
+            selected_cats.add(best_item.category_id)
+            selected_skus.update(self._get_script_sku_keys(best_item))
+            selected_angles.add(best_item.narrative_angle)
+
+        return selected
+
+    def produce_from_m3(
+        self,
+        m3_data: M3ApprovedScriptsOutput,
+        layout_mode: Literal["B1", "cinema", "fullscreen"] = "B1",
+        target_script_id: Optional[str] = None,
+        max_videos: Optional[int] = None,
+        allow_rerender_same_id: bool = True,
+        ignore_cooldown: bool = True,
+        enforce_sku_cooldown: bool = True,
+        quota_mgr: Optional[DailyQuotaManager] = None,
+    ) -> M4ProductionOutput:
+        qm = quota_mgr or DailyQuotaManager()
+
+        # Sync M3 approved scripts into VideoRegistryManager (`SCRIPT_APPROVED`)
+        norm_keys_by_script: Dict[str, List[str]] = {}
+        for s in m3_data.audited_scripts:
+            norm_keys_by_script[s.script_id] = [
+                normalize_sku_key(c.brand, c.model_code, c.candidate_id)
+                for c in s.verified_factual_claims
+            ]
+        self.video_registry.register_approved_scripts(
+            scripts=m3_data.audited_scripts,
+            m3_run_id=m3_data.m3_run_id,
+            normalized_keys_by_script=norm_keys_by_script,
+        )
+
+        # Merge current M3 scripts with any queued `SCRIPT_APPROVED` surplus scripts in VideoRegistry
+        by_id: Dict[str, AuditedScriptItem] = {}
+        for s in m3_data.audited_scripts:
+            if s.qaqc_status in ("APPROVED", "APPROVED_WITH_AUTO_PATCH"):
+                by_id[s.script_id] = s
+        for qs in self.video_registry.get_queued_approved_scripts():
+            if qs.script_id not in by_id and qs.qaqc_status in ("APPROVED", "APPROVED_WITH_AUTO_PATCH"):
+                by_id[qs.script_id] = qs
+
+        eligible = [
+            s
+            for s in by_id.values()
+            if (not target_script_id or s.script_id == target_script_id)
+        ]
+
+        used_today, _, existing_ids = qm.get_video_quota_status()
+        skipped_ids: List[str] = []
+
+        # Check 2-hour cooldown before selecting scripts when `ignore_cooldown=False`
+        can_now, cd_status, wait_secs = qm.can_render_video_now(
+            script_id=target_script_id,
+            allow_rerender_same_id=allow_rerender_same_id,
+            ignore_cooldown=ignore_cooldown,
+        )
+        if not can_now and cd_status == "COOLDOWN_RESTING_2H":
+            cd_info = qm.get_cooldown_status()
+            sleep_info = qm.get_sleep_until_tomorrow_info()
+            now_iso = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+            m4_run_id = f"m4_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}_{m3_data.sub_niche_id}"
+            print(
+                f"[M4 COOLDOWN] Đang trong thời gian nghỉ 2 tiếng sau khi render video trước! "
+                f"Còn {wait_secs}s nữa mới được render tiếp (lúc {cd_info['next_render_allowed_at']}).",
+                flush=True,
+            )
+            return M4ProductionOutput(
+                m4_run_id=m4_run_id,
+                source_m3_run_id=m3_data.m3_run_id,
+                generated_at=now_iso,
+                daily_video_quota_limit=MAX_VIDEOS_PER_DAY,
+                daily_videos_rendered_today=used_today,
+                remaining_video_quota_today=max(0, MAX_VIDEOS_PER_DAY - used_today),
+                min_render_cooldown_seconds=MIN_RENDER_COOLDOWN_SECONDS,
+                next_render_allowed_at=cd_info["next_render_allowed_at"],
+                seconds_until_next_render=wait_secs,
+                quota_status="COOLDOWN_RESTING_2H",
+                next_quota_reset_at=sleep_info["next_reset_at"],
+                seconds_until_quota_reset=sleep_info["seconds_until_reset"],
+                skipped_due_to_quota_script_ids=[s.script_id for s in eligible],
+                rendered_videos=[],
+            )
+
+        rerenderable: List[AuditedScriptItem] = []
+        new_candidates: List[AuditedScriptItem] = []
+        for s in eligible:
+            if s.script_id in existing_ids:
+                if allow_rerender_same_id:
+                    rerenderable.append(s)
+                else:
+                    skipped_ids.append(s.script_id)
+            else:
+                if used_today < MAX_VIDEOS_PER_DAY and qm.can_render_video(
+                    s.script_id, allow_rerender_same_id=allow_rerender_same_id
+                ):
+                    new_candidates.append(s)
+                else:
+                    skipped_ids.append(s.script_id)
+
+        remaining_new_slots = max(0, MAX_VIDEOS_PER_DAY - used_today)
+        if max_videos is not None:
+            total_cap = max(0, max_videos)
+        elif not ignore_cooldown:
+            # When 2-hour cooldown is enforced, render at most 1 video per invocation, then rest 2 hours!
+            total_cap = 1
+        else:
+            total_cap = MAX_VIDEOS_PER_DAY
+
+        # Collect SKUs already rendered earlier today so subsequent runs on the same day never repeat a SKU
+        rendered_skus_today: set[str] = set()
+        for r_id in existing_ids:
+            entry = self.video_registry.get_entry(r_id)
+            if entry:
+                rendered_skus_today.update(entry.primary_sku_ids)
+                rendered_skus_today.update(entry.normalized_sku_keys)
+
+        if allow_rerender_same_id and rerenderable:
+            selected_rerender = self._select_diverse_daily_scripts(
+                rerenderable,
+                min(total_cap, len(rerenderable)),
+                enforce_sku_cooldown=enforce_sku_cooldown,
+            )
+            rem_cap = max(0, total_cap - len(selected_rerender))
+            used_skus = set(rendered_skus_today)
+            for sr in selected_rerender:
+                used_skus.update(self._get_script_sku_keys(sr))
+            selected_new = self._select_diverse_daily_scripts(
+                new_candidates,
+                min(rem_cap, remaining_new_slots),
+                enforce_sku_cooldown=enforce_sku_cooldown,
+                already_rendered_skus_today=used_skus,
+            )
+            to_render = selected_rerender + selected_new
+        else:
+            to_render = self._select_diverse_daily_scripts(
+                new_candidates,
+                min(total_cap, remaining_new_slots),
+                enforce_sku_cooldown=enforce_sku_cooldown,
+                already_rendered_skus_today=rendered_skus_today,
+            )
+
+        selected_id_set = {s.script_id for s in to_render}
+        for s in eligible:
+            if s.script_id not in selected_id_set and s.script_id not in skipped_ids:
+                skipped_ids.append(s.script_id)
+
+        rendered_items: List[RenderedVideoItem] = []
+        if to_render:
+            async def _run_batch() -> List[RenderedVideoItem]:
+                out: List[RenderedVideoItem] = []
+                for idx, sc in enumerate(to_render, start=1):
+                    voices_so_far = qm.get_rendered_voices_today() + [r.voice_name for r in out]
+                    print(
+                        f"\n[M4] Rendering video [{idx}/{len(to_render)}]: {sc.script_id} (Layout B1, zero-zoom)...",
+                        flush=True,
+                    )
+                    started_iso = qm.record_render_started(sc.script_id)
+                    item = await self._produce_single_video_async(
+                        sc,
+                        m3_data,
+                        layout_mode,
+                        voices_used_today=voices_so_far,
+                    )
+                    ev = qm.record_rendered_video(
+                        sc.script_id,
+                        render_duration_sec=item.render_duration_sec,
+                        voice_name=item.voice_name,
+                        started_at=started_iso,
+                    )
+                    item.render_started_at = ev["render_started_at"]
+                    item.render_finished_at = ev["render_finished_at"]
+                    item.next_render_allowed_at = ev["next_render_allowed_at"]
+
+                    norm_keys = [
+                        normalize_sku_key(c.brand, c.model_code, c.candidate_id)
+                        for c in sc.verified_factual_claims
+                    ]
+                    self.video_registry.mark_video_rendered(
+                        script_id=sc.script_id,
+                        video_path=item.video_path,
+                        render_duration_sec=item.render_duration_sec,
+                        voice_name=item.voice_name,
+                        voice_gender=item.voice_gender,
+                        bgm_track=item.bgm_track,
+                        script_obj=sc,
+                        normalized_sku_keys=norm_keys,
+                    )
+                    self.sku_registry.record_rendered_video_skus(
+                        script_format=sc.script_format,
+                        candidate_or_sku_keys=norm_keys + list(sc.primary_sku_ids),
+                        script_id=sc.script_id,
+                    )
+                    out.append(item)
+                return out
+
+            rendered_items = asyncio.run(_run_batch())
+
+        used_after, rem_after, _ = qm.get_video_quota_status()
+        cd_after = qm.get_cooldown_status()
+        sleep_info = qm.get_sleep_until_tomorrow_info()
+
+        if rem_after == 0:
+            quota_status: Literal[
+                "WITHIN_DAILY_QUOTA",
+                "COOLDOWN_RESTING_2H",
+                "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW",
+            ] = "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW"
+        elif not ignore_cooldown and cd_after["is_resting"]:
+            quota_status = "COOLDOWN_RESTING_2H"
+        else:
+            quota_status = "WITHIN_DAILY_QUOTA"
+
+        if quota_status == "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW":
+            print(
+                f"\n[M4 QUOTA] Đã xuất đủ {used_after}/{MAX_VIDEOS_PER_DAY} video trong ngày hôm nay! "
+                f"Chuyển sang trạng thái ngủ (SLEEP) chờ đến ngày mai ({sleep_info['next_reset_at']}).",
+                flush=True,
+            )
+            if skipped_ids:
+                print(
+                    f"[M4 QUOTA] Queued surplus scripts in video_registry (SCRIPT_APPROVED): {skipped_ids}",
+                    flush=True,
+                )
+        elif quota_status == "COOLDOWN_RESTING_2H":
+            print(
+                f"\n[M4 COOLDOWN] Đã render xong 1 video ({used_after}/{MAX_VIDEOS_PER_DAY} trong ngày). "
+                f"Module M4 nghỉ ngơi 2 tiếng đến {cd_after['next_render_allowed_at']}.",
+                flush=True,
+            )
+
+        now_iso = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+        m4_run_id = f"m4_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}_{m3_data.sub_niche_id}"
+
+        return M4ProductionOutput(
+            m4_run_id=m4_run_id,
+            source_m3_run_id=m3_data.m3_run_id,
+            generated_at=now_iso,
+            daily_video_quota_limit=MAX_VIDEOS_PER_DAY,
+            daily_videos_rendered_today=used_after,
+            remaining_video_quota_today=rem_after,
+            min_render_cooldown_seconds=MIN_RENDER_COOLDOWN_SECONDS,
+            next_render_allowed_at=cd_after["next_render_allowed_at"],
+            seconds_until_next_render=int(cd_after["seconds_until_next_render"]),
+            quota_status=quota_status,
+            next_quota_reset_at=sleep_info["next_reset_at"],
+            seconds_until_quota_reset=sleep_info["seconds_until_reset"],
+            skipped_due_to_quota_script_ids=skipped_ids,
+            rendered_videos=rendered_items,
+        )
+
+    def run(
+        self,
+        input_path: Path = INPUT_M3_PATH,
+        output_json_path: Path = OUTPUT_M4_JSON_PATH,
+        layout_mode: Literal["B1", "cinema", "fullscreen"] = "B1",
+        target_script_id: Optional[str] = None,
+        max_videos: Optional[int] = None,
+        allow_rerender_same_id: bool = True,
+        ignore_cooldown: bool = True,
+        enforce_sku_cooldown: bool = True,
+        quota_mgr: Optional[DailyQuotaManager] = None,
+    ) -> M4ProductionOutput:
+        if not input_path.exists():
+            raise FileNotFoundError(f"M4 input M3 contract not found: {input_path}")
+
+        print(f"[M4] Reading M3 approved scripts from: {input_path}...", flush=True)
+        m3_data = M3ApprovedScriptsOutput.model_validate_json(
+            input_path.read_text(encoding="utf-8")
+        )
+
+        output_obj = self.produce_from_m3(
+            m3_data=m3_data,
+            layout_mode=layout_mode,
+            target_script_id=target_script_id,
+            max_videos=max_videos,
+            allow_rerender_same_id=allow_rerender_same_id,
+            ignore_cooldown=ignore_cooldown,
+            enforce_sku_cooldown=enforce_sku_cooldown,
+            quota_mgr=quota_mgr,
+        )
+
+        atomic_write_text(output_json_path, output_obj.model_dump_json(indent=2))
+        StorageGarbageCollector().sweep_all()
+        print(f"[M4] Wrote production contract atomically to: {output_json_path}", flush=True)
+        return output_obj
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run Module M4: 100% Autonomous 9:16 Video Producer (Layout B1).")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=INPUT_M3_PATH,
+        help="Input JSON path from M3 (default: data/m3_approved_scripts.json)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT_M4_JSON_PATH,
+        help="Output production JSON path (default: data/m4_production_output.json)",
+    )
+    parser.add_argument(
+        "--layout",
+        choices=["B1", "cinema", "fullscreen"],
+        default="B1",
+        help="Layout mode (default: B1 — single-frame 16:9 + same-shot ambient blur)",
+    )
+    parser.add_argument(
+        "--script-id",
+        type=str,
+        default=None,
+        help="Optional single script_id filter to render",
+    )
+    parser.add_argument(
+        "--max-videos",
+        type=int,
+        default=None,
+        help="Optional max videos to render in this run (capped at 3/day)",
+    )
+    parser.add_argument(
+        "--ignore-cooldown",
+        action="store_true",
+        default=False,
+        help="Bypass the 2-hour post-render cooldown (for batch verification runs)",
+    )
+    args = parser.parse_args()
+
+    engine = M4VideoProducerEngine()
+    engine.run(
+        input_path=args.input,
+        output_json_path=args.output,
+        layout_mode=args.layout,  # type: ignore[arg-type]
+        target_script_id=args.script_id,
+        max_videos=args.max_videos,
+        ignore_cooldown=args.ignore_cooldown,
+    )
+
+
+if __name__ == "__main__":
+    main()

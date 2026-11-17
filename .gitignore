@@ -1,0 +1,37 @@
+# 1. Secrets & Local Credentials (NEVER COMMIT)
+.env
+config/platform_credentials.json
+
+# 2. Local Virtualenv, Binaries & Logs
+.venv/
+bin/
+logs/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 3. Legacy PoC Folder (292MB demo videos)
+poc/
+
+# 4. Runtime State, Video Caches & Rendered Outputs (Owned by Production Mac 2015)
+output/
+data/.*.lock
+data/*.bak
+data/*.tmp.*
+data/brand_official_cache/
+data/m4_video_cache/
+data/m4_work/
+data/daily_quota_state.json
+data/m0_candidate_pool.json
+data/m0_history.json
+data/m1_qualified_skus.json
+data/m1_5_combo_result.json
+data/m2_script_drafts.json
+data/m3_approved_scripts.json
+data/m4_production_output.json
+data/m5_publish_report.json
+data/m5_publish_state.json
+data/manual_affiliate_links.json
+data/short_links_registry.json
+data/sku_registry.json
+data/video_registry.json

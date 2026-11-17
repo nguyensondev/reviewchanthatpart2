@@ -1,0 +1,206 @@
+{
+  "version": "1.0.0",
+  "description": "Official Manufacturer & Brand Channel Whitelist + Curated Official Video Catalog for M0, M1, M1.5, and M4.",
+  "official_brand_channels": {
+    "baseus": ["Baseus", "Baseus Official", "Baseus Global"],
+    "logitech": ["Logitech", "Logitech Support", "Logitech G", "Logitech Global"],
+    "tanita": ["TANITA official", "Tanita", "Tanita Official", "TANITA"],
+    "xiaomi": ["Xiaomi", "Mi", "Xiaomi Global", "Xiaomi Official"],
+    "ugreen": ["UGREEN", "Ugreen Official", "Ugreen"],
+    "anker": ["Anker", "Anker Official"],
+    "lock&lock": ["LocknLock", "Lock&Lock Official", "LocknLock Official"],
+    "locknlock": ["LocknLock", "Lock&Lock Official", "LocknLock Official"],
+    "elmich": ["Elmich", "Elmich Official"],
+    "inochi": ["Inochi", "Inochi Official"],
+    "bear": ["Bear", "Bear Official", "Bear Appliances"],
+    "philips": ["Philips", "Philips Home Living", "Philips Official"],
+    "deerma": ["Deerma", "Deerma Official"],
+    "etekcity": ["Etekcity", "Etekcity Official"],
+    "timemore": ["TIMEMORE", "Timemore Official"],
+    "hoto": ["HOTO", "HOTO Official", "Mi"],
+    "hyperwork": ["HyperWork", "HyperWork Official"],
+    "orico": ["ORICO", "ORICO Official"],
+    "benq": ["BenQ", "BenQ Global"],
+    "keychron": ["Keychron", "Keychron Keyboard"],
+    "edifier": ["Edifier", "Edifier Global"],
+    "soundpeats": ["SoundPEATS", "SOUNDPEATS Official"],
+    "nuphy": ["NuPhy", "NuPhy Studio"],
+    "akko": ["Akko", "Akko Official"],
+    "belkin": ["Belkin", "Belkin Official"],
+    "momax": ["MOMAX", "Momax Official"],
+    "hagibis": ["Hagibis", "Hagibis Official"],
+    "delux": ["DELUX", "Delux Official"],
+    "zojirushi": ["Zojirushi", "Zojirushi America", "ZOJIRUSHI"],
+    "tefal": ["Tefal", "Tefal Vietnam", "Tefal Official"],
+    "panasonic": ["Panasonic", "Panasonic Vietnam"],
+    "toshiba": ["Toshiba", "Toshiba Lifestyle Vietnam"],
+    "sunhouse": ["SUNHOUSE", "Sunhouse Group"],
+    "bluestone": ["BlueStone", "BlueStone Vietnam"],
+    "simplus": ["Simplus", "Simplus Official"],
+    "joyoung": ["Joyoung", "Joyoung Global"],
+    "midea": ["Midea", "Midea Official"]
+  },
+  "blocked_third_party_channel_keywords": [
+    "techmall",
+    "chube",
+    "đạt lê",
+    "dat le",
+    "hoàng gia",
+    "hoang gia",
+    "hoàng minh phát",
+    "hoang minh phat",
+    "bidica",
+    "review phim",
+    "chị đẹp",
+    "ghiền công nghệ",
+    "ghien cong nghe",
+    "tiêu xài thông minh",
+    "tieu xai thong minh",
+    "duy luân",
+    "duy luan",
+    "vật vờ",
+    "vat vo",
+    "schannel",
+    "cellphones",
+    "điện máy xanh",
+    "dien may xanh",
+    "fpt shop",
+    "the review dad",
+    "edna forshaw",
+    "consumer tech review",
+    "jsyntax"
+  ],
+  "curated_official_videos": {
+    "baseus_i_wok2": [
+      {
+        "video_id": "34zpkuo3c8k",
+        "url": "https://www.youtube.com/watch?v=34zpkuo3c8k",
+        "title": "Baseus i-wok2 Series USB Asymmetric Light Source Screen Hanging Light",
+        "channel": "Baseus",
+        "duration_sec": 50,
+        "max_height": 1080,
+        "view_count": 28500,
+        "matched_query": "Baseus i-wok2 official"
+      }
+    ],
+    "baseus_iwok2": [
+      {
+        "video_id": "34zpkuo3c8k",
+        "url": "https://www.youtube.com/watch?v=34zpkuo3c8k",
+        "title": "Baseus i-wok2 Series USB Asymmetric Light Source Screen Hanging Light",
+        "channel": "Baseus",
+        "duration_sec": 50,
+        "max_height": 1080,
+        "view_count": 28500,
+        "matched_query": "Baseus i-wok2 official"
+      }
+    ],
+    "logitech_lift_vertical": [
+      {
+        "video_id": "kWEbfrHi65A",
+        "url": "https://www.youtube.com/watch?v=kWEbfrHi65A",
+        "title": "Lift Yourself Up | Introducing Lift Vertical Ergonomic Mouse",
+        "channel": "Logitech",
+        "duration_sec": 60,
+        "max_height": 1080,
+        "view_count": 145000,
+        "matched_query": "Logitech Lift Vertical official"
+      },
+      {
+        "video_id": "mqYjLYhvNsI",
+        "url": "https://www.youtube.com/watch?v=mqYjLYhvNsI",
+        "title": "How to pair your Logitech Lift Vertical Ergonomic Mouse",
+        "channel": "Logitech Support",
+        "duration_sec": 159,
+        "max_height": 1080,
+        "view_count": 68000,
+        "matched_query": "Logitech Lift Vertical official"
+      }
+    ],
+    "logitech_vertical_lift": [
+      {
+        "video_id": "kWEbfrHi65A",
+        "url": "https://www.youtube.com/watch?v=kWEbfrHi65A",
+        "title": "Lift Yourself Up | Introducing Lift Vertical Ergonomic Mouse",
+        "channel": "Logitech",
+        "duration_sec": 60,
+        "max_height": 1080,
+        "view_count": 145000,
+        "matched_query": "Logitech Lift Vertical official"
+      },
+      {
+        "video_id": "mqYjLYhvNsI",
+        "url": "https://www.youtube.com/watch?v=mqYjLYhvNsI",
+        "title": "How to pair your Logitech Lift Vertical Ergonomic Mouse",
+        "channel": "Logitech Support",
+        "duration_sec": 159,
+        "max_height": 1080,
+        "view_count": 68000,
+        "matched_query": "Logitech Lift Vertical official"
+      }
+    ],
+    "tanita_kd_series": [
+      {
+        "video_id": "kSofEP0V3KY",
+        "url": "https://www.youtube.com/watch?v=kSofEP0V3KY",
+        "title": "TANITA Digital Cooking Scale KD-320 ml mode",
+        "channel": "TANITA official",
+        "duration_sec": 64,
+        "max_height": 1080,
+        "view_count": 9800,
+        "matched_query": "Tanita KD official"
+      }
+    ],
+    "tanita_kitchen_scale": [
+      {
+        "video_id": "kSofEP0V3KY",
+        "url": "https://www.youtube.com/watch?v=kSofEP0V3KY",
+        "title": "TANITA Digital Cooking Scale KD-320 ml mode",
+        "channel": "TANITA official",
+        "duration_sec": 64,
+        "max_height": 1080,
+        "view_count": 9800,
+        "matched_query": "Tanita KD official"
+      }
+    ]
+  },
+  "verified_clean_shot_intervals": {
+    "34zpkuo3c8k": [
+      [0.0, 2.3],
+      [5.0, 8.3],
+      [8.5, 10.9],
+      [13.0, 14.9],
+      [15.0, 16.9],
+      [19.0, 21.9],
+      [39.8, 42.6]
+    ],
+    "kWEbfrHi65A": [
+      [6.1, 7.8],
+      [20.1, 23.8],
+      [35.1, 36.8],
+      [45.1, 48.5],
+      [50.8, 51.9]
+    ],
+    "mqYjLYhvNsI": [
+      [37.8, 41.2],
+      [63.5, 68.8]
+    ],
+    "LVymY78FSBI": [
+      [11.5, 14.0],
+      [23.5, 29.8],
+      [36.0, 42.8],
+      [59.5, 61.8],
+      [73.5, 84.8]
+    ],
+    "kSofEP0V3KY": [
+      [5.2, 9.5],
+      [9.6, 14.0],
+      [14.1, 18.5],
+      [34.0, 35.8],
+      [41.2, 46.0],
+      [46.2, 51.0],
+      [51.2, 56.5],
+      [56.6, 62.2]
+    ]
+  }
+}

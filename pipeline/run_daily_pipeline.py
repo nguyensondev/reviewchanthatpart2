@@ -1,0 +1,403 @@
+"""
+Master Daily Pipeline Orchestrator — Step C (`pipeline/run_daily_pipeline.py`).
+
+Coordinates modular execution of:
+  - Planning Batch (`M0 -> M1 -> M1.5 -> M2 -> M3`): Runs at most once per day when the
+    eligible `SCRIPT_APPROVED` queue needs replenishment, rotating across 18+ functional
+    categories (`TECH_DESK` + `KITCHEN_TECH`) and blocking any category/SKU on 3-7 day cooldown.
+  - Render Worker (`M4`): Renders at most 1 video per invocation (up to 3 videos/day),
+    enforcing the 2-hour post-render rest (`COOLDOWN_RESTING_2H`) AND the random 3-7 day
+    per-SKU cooldown (`next_eligible_at`) so no SKU ever appears in both a Solo video and
+    a Combo video within 3-7 days.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+from typing import List, Optional
+
+from pipeline.core_resilience import (
+    HumanBehaviorGuard,
+    MacOSLegacyRuntime,
+    SingleInstanceLock,
+    StorageGarbageCollector,
+    TelegramNotifier,
+)
+from pipeline.daily_quota import (
+    MAX_FINAL_SCRIPTS_PER_DAY,
+    MAX_VIDEOS_PER_DAY,
+    MIN_RENDER_COOLDOWN_SECONDS,
+    DailyQuotaManager,
+)
+from pipeline.m0_discovery import M0AutonomousDiscoveryEngine, load_m0_history
+from pipeline.m1_5_combo_curator import M15ComboCuratorEngine
+from pipeline.m1_filter import M1SmartFilterEngine
+from pipeline.m2_script_gen import M2ScriptGeneratorEngine
+from pipeline.m3_qaqc import M3QAQCEngine
+from pipeline.m4_video_producer import M4VideoProducerEngine
+from pipeline.m5_publisher import M5PublisherEngine
+from pipeline.publish_packager import (
+    DEFAULT_MANUAL_LINKS_PATH,
+    DEFAULT_PUBLISH_MARKDOWN_PATH,
+    PublishPackager,
+)
+from pipeline.schemas_m1_5 import normalize_sku_key
+from pipeline.schemas_m3 import AuditedScriptItem
+from pipeline.shopee_browser_link_resolver import ShopeeAutoAffiliateResolver
+from pipeline.sku_registry import SKURegistryManager
+from pipeline.video_registry import VideoRegistryManager
+
+
+def _get_script_sku_keys(script: AuditedScriptItem, sreg: SKURegistryManager) -> set[str]:
+    keys: set[str] = set()
+    for cid in script.primary_sku_ids:
+        keys.add(cid)
+        resolved = sreg.resolve_sku_key_by_candidate_id(cid)
+        if resolved:
+            keys.add(resolved)
+    for c in script.verified_factual_claims:
+        keys.add(c.candidate_id)
+        keys.add(normalize_sku_key(c.brand, c.model_code, c.candidate_id))
+    return keys
+
+
+def get_ready_queued_scripts(
+    vreg: VideoRegistryManager,
+    sreg: SKURegistryManager,
+    qm: DailyQuotaManager,
+) -> tuple[List[AuditedScriptItem], List[tuple[AuditedScriptItem, str]]]:
+    """
+    Partition queued `SCRIPT_APPROVED` scripts into:
+      - `ready`: scripts whose SKUs are NOT in 3-7 day cooldown and NOT rendered today
+      - `waiting`: scripts temporarily held because at least one SKU is in 3-7 day cooldown
+    """
+    _, _, rendered_ids_today = qm.get_video_quota_status()
+    rendered_skus_today: set[str] = set()
+    for rid in rendered_ids_today:
+        entry = vreg.get_entry(rid)
+        if entry:
+            rendered_skus_today.update(entry.primary_sku_ids)
+            rendered_skus_today.update(entry.normalized_sku_keys)
+
+    ready: List[AuditedScriptItem] = []
+    waiting: List[tuple[AuditedScriptItem, str]] = []
+    all_entries = sreg.get_all_entries()
+
+    for sc in vreg.get_queued_approved_scripts():
+        if sc.script_id in rendered_ids_today:
+            continue
+        skus = _get_script_sku_keys(sc, sreg)
+        if skus & rendered_skus_today:
+            waiting.append((sc, "Vừa xuất hiện trong ngày hôm nay (chờ hết kỳ nghỉ 3-7 ngày)"))
+            continue
+        cooldown_hits: List[str] = []
+        for k in skus:
+            if sreg.is_in_cooldown(k):
+                resolved = sreg.resolve_sku_key_by_candidate_id(k) or k
+                e = all_entries.get(resolved)
+                until_str = e.next_eligible_at if e and e.next_eligible_at else "3-7d"
+                cooldown_hits.append(f"{resolved} (mở khóa: {until_str})")
+        if cooldown_hits:
+            waiting.append((sc, f"SKU đang nghỉ 3-7 ngày: {', '.join(cooldown_hits)}"))
+        else:
+            ready.append(sc)
+
+    return ready, waiting
+
+
+def print_pipeline_status() -> None:
+    qm = DailyQuotaManager()
+    vreg = VideoRegistryManager()
+    sreg = SKURegistryManager()
+    m0_engine = M0AutonomousDiscoveryEngine()
+    history = load_m0_history()
+
+    s_used, s_rem, s_ids = qm.get_script_quota_status()
+    v_used, v_rem, v_ids = qm.get_video_quota_status()
+    cd = qm.get_cooldown_status()
+    can_now, cd_status, wait_secs = qm.can_render_video_now(
+        allow_rerender_same_id=False,
+        ignore_cooldown=False,
+    )
+
+    print("======================================================================", flush=True)
+    print("  BẢNG ĐIỀU KHIỂN TRẠNG THÁI PIPELINE HÀNG NGÀY (M0 -> M1.5 -> M4)", flush=True)
+    print("======================================================================", flush=True)
+    print(f"• Ngày hiện tại          : {qm.today_key()}", flush=True)
+    print(
+        f"• Quota Kịch bản (M3)    : {s_used}/{MAX_FINAL_SCRIPTS_PER_DAY} đã duyệt hôm nay (còn lại: {s_rem})",
+        flush=True,
+    )
+    print(
+        f"• Quota Render Video (M4): {v_used}/{MAX_VIDEOS_PER_DAY} đã render hôm nay (còn lại: {v_rem})",
+        flush=True,
+    )
+    print(
+        f"• Nhịp nghỉ 2h (M4)      : status={cd_status} | can_render_now={can_now} | "
+        f"wait={wait_secs}s (next_allowed={cd['next_render_allowed_at'] or 'NOW'})",
+        flush=True,
+    )
+
+    rendered_unposted = vreg.get_rendered_unposted_videos()
+    ready_scripts, waiting_scripts = get_ready_queued_scripts(vreg, sreg, qm)
+
+    print("\n--- [1] SỔ TRẠNG THÁI VIDEO (`data/video_registry.json`) ---", flush=True)
+    print(f"• Video đã render (`RENDERED`, chờ module đăng bài): {len(rendered_unposted)}", flush=True)
+    for rv in rendered_unposted:
+        print(
+            f"  - [{rv.status}] {rv.script_id} ({rv.script_format} | {rv.domain} | voice={rv.voice_name}/{rv.voice_gender}) "
+            f"-> {rv.video_path}",
+            flush=True,
+        )
+    print(f"• Kịch bản sẵn sàng render ngay (`SCRIPT_APPROVED` & SKU mở khóa): {len(ready_scripts)}", flush=True)
+    for sc in ready_scripts:
+        print(f"  - [READY_NOW] {sc.script_id} ({sc.script_format} | SKUs={sc.primary_sku_ids})", flush=True)
+    print(f"• Kịch bản đang tạm giữ chờ hết kỳ nghỉ SKU 3-7 ngày: {len(waiting_scripts)}", flush=True)
+    for sc, reason in waiting_scripts:
+        print(f"  - [HOLD_3_7D] {sc.script_id} ({sc.script_format} | SKUs={sc.primary_sku_ids}) -> {reason}", flush=True)
+
+    print("\n--- [2] VÒNG ĐỜI SKU & KHÓA NGẪU NHIÊN 3-7 NGÀY (`data/sku_registry.json`) ---", flush=True)
+    sku_entries = sreg.get_all_entries()
+    if not sku_entries:
+        print("  (Chưa có SKU nào trong sổ đăng ký)", flush=True)
+    for k, e in sku_entries.items():
+        in_cd = sreg.is_in_cooldown(k)
+        cd_tag = f"COOLDOWN_{e.cooldown_days}D (đến {e.next_eligible_at})" if in_cd else "OPEN"
+        print(
+            f"  - {k}: status={e.lifecycle_status} | solo={e.has_solo_video} | combo={e.has_combo_video} | "
+            f"cooldown={cd_tag}",
+            flush=True,
+        )
+
+    blocked_cats, fresh_tech, fresh_kitchen = m0_engine._get_blocked_and_fresh_categories(history)
+    print("\n--- [3] XOAY VÒNG DANH MỤC THÔNG MINH M0 (`CATEGORY_ROTATION_TAXONOMY`) ---", flush=True)
+    print(f"• Danh mục đang khóa (vừa chạy / đang nghỉ 3-7 ngày): {sorted(blocked_cats)}", flush=True)
+    print(
+        f"• Danh mục mới sẵn sàng cho lần quét kế tiếp: "
+        f"TECH_DESK={[c['category_id'] for c in fresh_tech[:3]]} | "
+        f"KITCHEN_TECH={[c['category_id'] for c in fresh_kitchen[:3]]}",
+        flush=True,
+    )
+
+    in_active_hrs, wait_hrs = HumanBehaviorGuard.is_within_human_active_hours()
+    print("\n--- [4] GÓI ĐĂNG BÀI, CHỐNG BOT SHOPEE & NHỊP NGƯỜI THẬT (BƯỚC A + M5) ---", flush=True)
+    print(
+        f"• Khung giờ người thật (08:15-22:15): {'ĐANG MỞ' if in_active_hrs else f'NGHỈ ĐÊM (còn {wait_hrs}s)'}",
+        flush=True,
+    )
+    print(
+        f"• Tối ưu máy Mac cũ     : FFmpeg threads={MacOSLegacyRuntime.optimal_ffmpeg_threads()} | font={MacOSLegacyRuntime.resolve_font_path(bold=True)}",
+        flush=True,
+    )
+    print(f"• Bảng copy-paste đăng bài: {DEFAULT_PUBLISH_MARKDOWN_PATH}", flush=True)
+    print(f"• Sổ điền link Shopee nhanh: {DEFAULT_MANUAL_LINKS_PATH}", flush=True)
+    print("======================================================================", flush=True)
+
+
+def run_planning_batch(topic_hint: Optional[str] = None, max_categories: int = 3) -> None:
+    """Run M0 -> M1 -> M1.5 -> M2 -> M3 once to discover fresh categories & queue approved scripts."""
+    qm = DailyQuotaManager()
+    s_used, s_rem, _ = qm.get_script_quota_status()
+    if s_rem <= 0:
+        print(
+            f"[PLAN] Đã chạm trần {s_used}/{MAX_FINAL_SCRIPTS_PER_DAY} kịch bản trong ngày hôm nay. "
+            "Bỏ qua M0->M3 để bảo toàn quota.",
+            flush=True,
+        )
+        return
+
+    print("\n=== [STEP C - PLAN] Running M0 -> M1 -> M1.5 -> M2 -> M3 Discovery & Script Batch ===", flush=True)
+    M0AutonomousDiscoveryEngine().run(topic_hint=topic_hint, max_categories=max_categories)
+    M1SmartFilterEngine().run()
+    M15ComboCuratorEngine().run()
+    M2ScriptGeneratorEngine().run()
+    M3QAQCEngine().run(quota_mgr=qm)
+
+
+def run_single_render_step(ignore_2h_cooldown: bool = False) -> None:
+    """Run M4 (1 video) -> PublishPackager -> M5 (stage SEO & Affiliate payloads) -> StorageGC."""
+    qm = DailyQuotaManager()
+    m4_out = M4VideoProducerEngine().run(
+        layout_mode="B1",
+        max_videos=1,
+        allow_rerender_same_id=False,
+        ignore_cooldown=ignore_2h_cooldown,
+        enforce_sku_cooldown=True,
+        quota_mgr=qm,
+    )
+    manifest = PublishPackager().build_publish_pack()
+    M5PublisherEngine().run(live_upload=False)
+    StorageGarbageCollector().sweep_all()
+
+    if m4_out and m4_out.rendered_videos:
+        rendered_summary = [
+            f"🎬 Đã render mới {len(m4_out.rendered_videos)} video:",
+            *[
+                f"  • {rv.script_id} ({rv.duration_sec}s | giọng {rv.voice_name})"
+                for rv in m4_out.rendered_videos
+            ],
+            f"📦 Tổng video chờ đăng (RENDERED): {manifest.total_rendered_unposted_videos}",
+        ]
+        TelegramNotifier().notify_pipeline_event("🎬 HOÀN TẤT RENDER VIDEO MỚI (M4)", rendered_summary)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Master Daily Pipeline Orchestrator (M0 -> M1 -> M1.5 -> M2 -> M3 -> M4 -> Step A + M5)."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["status", "plan", "render", "pack", "publish", "shopee-auto", "gc", "auto"],
+        default="status",
+        help=(
+            "Execution mode: 'status', 'plan' (M0->M3 once), 'render' (M4 1 video + jittered rest), "
+            "'pack' (rebuild SEO + Official Shopee Mall publish pack & stage M5 payloads), "
+            "'publish' (run Module M5 publisher with human pacing), 'shopee-auto' (re-verify Official Shopee Mall links), "
+            "'gc' (run StorageGarbageCollector), 'auto' (smart daily tick)."
+        ),
+    )
+    parser.add_argument(
+        "--hint",
+        type=str,
+        default=None,
+        help="Optional topic hint for M0 when running --mode plan or --mode auto.",
+    )
+    parser.add_argument(
+        "--ignore-2h-cooldown",
+        action="store_true",
+        help="Bypass the 2-hour render cooldown (for manual testing only; 3-7d SKU cooldown still applies).",
+    )
+    args = parser.parse_args()
+    MacOSLegacyRuntime.ensure_runtime_path()
+
+    if args.mode == "status":
+        print_pipeline_status()
+        return 0
+
+    lock = SingleInstanceLock()
+    if not lock.acquire():
+        print("[LOCK] Một tiến trình pipeline khác đang chạy. Bỏ qua lượt gọi chồng này để bảo vệ RAM/CPU!", flush=True)
+        return 0
+
+    try:
+        MacOSLegacyRuntime.apply_gentle_background_priority()
+
+        if args.mode == "gc":
+            stats = StorageGarbageCollector().sweep_all()
+            print(f"[GC] Đã giải phóng {stats['total_freed_bytes'] / (1024 * 1024):.2f} MB dung lượng rác: {stats}", flush=True)
+            print_pipeline_status()
+            return 0
+
+        if args.mode == "shopee-auto":
+            PublishPackager().build_publish_pack()
+            ShopeeAutoAffiliateResolver().resolve_pending_skus(force_reverify_all=True)
+            PublishPackager().build_publish_pack()
+            M5PublisherEngine().run(live_upload=False)
+            print_pipeline_status()
+            return 0
+
+        if args.mode == "pack":
+            PublishPackager().build_publish_pack()
+            M5PublisherEngine().run(live_upload=False)
+            StorageGarbageCollector().sweep_all()
+            print_pipeline_status()
+            return 0
+
+        if args.mode in ("plan", "render", "publish", "auto"):
+            if not MacOSLegacyRuntime.wait_for_internet_ready(max_wait_sec=25):
+                print(
+                    f"[NETWORK] Wi-Fi/Internet tạm gián đoạn sau 25s chờ (mode={args.mode}). "
+                    "Tạm hoãn an toàn sang chu kỳ chạy ngầm kế tiếp!",
+                    flush=True,
+                )
+                return 0
+
+        if args.mode == "publish":
+            PublishPackager().build_publish_pack()
+            M5PublisherEngine().run(live_upload=True)
+            print_pipeline_status()
+            return 0
+
+        if args.mode == "plan":
+            run_planning_batch(topic_hint=args.hint)
+            print_pipeline_status()
+            return 0
+
+        if args.mode == "render":
+            run_single_render_step(ignore_2h_cooldown=args.ignore_2h_cooldown)
+            print_pipeline_status()
+            return 0
+
+        # --mode auto
+        in_hrs, wait_hrs = HumanBehaviorGuard.is_within_human_active_hours()
+        if not in_hrs and not args.ignore_2h_cooldown:
+            print(
+                f"[AUTO] Đang ngoài khung giờ hoạt động của người thật (còn {wait_hrs}s đến sáng). Tạm nghỉ!",
+                flush=True,
+            )
+            StorageGarbageCollector().sweep_all()
+            print_pipeline_status()
+            return 0
+
+        qm = DailyQuotaManager()
+        vreg = VideoRegistryManager()
+        sreg = SKURegistryManager()
+
+        can_now, cd_status, wait_secs = qm.can_render_video_now(
+            allow_rerender_same_id=False,
+            ignore_cooldown=args.ignore_2h_cooldown,
+        )
+        if not can_now:
+            print(
+                f"[AUTO] M4 đang trong nhịp nghỉ tự nhiên (status={cd_status}, wait={wait_secs}s).",
+                flush=True,
+            )
+        else:
+            ready_scripts, _ = get_ready_queued_scripts(vreg, sreg, qm)
+            _, s_rem, _ = qm.get_script_quota_status()
+            if not ready_scripts and s_rem > 0:
+                print(
+                    "[AUTO] Hàng đợi kịch bản mở khóa đang trống -> Tự động chạy 1 lượt M0->M3 để tìm nhóm sản phẩm mới...",
+                    flush=True,
+                )
+                run_planning_batch(topic_hint=args.hint)
+                ready_scripts, _ = get_ready_queued_scripts(vreg, sreg, qm)
+
+            if ready_scripts:
+                run_single_render_step(ignore_2h_cooldown=args.ignore_2h_cooldown)
+            else:
+                print(
+                    "[AUTO] Chưa có kịch bản nào đủ điều kiện mở khóa để render lúc này.",
+                    flush=True,
+                )
+
+        # Autonomous M5 Live Publish tick inside active human hours
+        unposted = vreg.get_rendered_unposted_videos()
+        m5_engine = M5PublisherEngine()
+        can_pub, pub_reason, wait_pub = m5_engine.can_publish_human_now(force_now=args.ignore_2h_cooldown)
+        if unposted and can_pub:
+            print("[AUTO] Đã đến nhịp đăng bài tự nhiên -> Chạy M5 Live Upload cho 1 video...", flush=True)
+            PublishPackager().build_publish_pack()
+            m5_engine.run(live_upload=True, force_now=args.ignore_2h_cooldown)
+        elif unposted:
+            print(
+                f"[AUTO] Có {len(unposted)} video chờ đăng nhưng M5 đang nghỉ nhịp người thật ({pub_reason}, wait={wait_pub}s).",
+                flush=True,
+            )
+
+        StorageGarbageCollector().sweep_all()
+        print_pipeline_status()
+        return 0
+    except Exception as exc:
+        TelegramNotifier().notify_pipeline_event(
+            "⚠️ CẢNH BÁO LỖI PIPELINE",
+            [f"Mode: {args.mode}", f"Chi tiết: {exc}"],
+        )
+        raise
+    finally:
+        lock.release()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

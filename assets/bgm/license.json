@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "policy": "100% Copyright-Safe / CC0 Original Procedural Instrumental Library (Zero Third-Party Claims)",
+  "tracks": [
+    {
+      "track_id": "bgm_upbeat_1_sunny_desk",
+      "filename": "bgm_upbeat_1_sunny_desk.m4a",
+      "title": "Sunny Desk Groove (Upbeat Review #1)",
+      "key": "C Major (I - V - vi - IV)",
+      "bpm": 112,
+      "duration_sec": 64.0,
+      "license": "CC0-1.0 Public Domain / Original Procedural Studio Synthesis (Zero Copyright / No Content-ID)"
+    },
+    {
+      "track_id": "bgm_upbeat_2_fresh_morning",
+      "filename": "bgm_upbeat_2_fresh_morning.m4a",
+      "title": "Fresh Morning Pop (Upbeat Review #2)",
+      "key": "G Major (I - vi - IV - V)",
+      "bpm": 116,
+      "duration_sec": 64.0,
+      "license": "CC0-1.0 Public Domain / Original Procedural Studio Synthesis (Zero Copyright / No Content-ID)"
+    },
+    {
+      "track_id": "bgm_upbeat_3_smart_living",
+      "filename": "bgm_upbeat_3_smart_living.m4a",
+      "title": "Smart Living Pluck (Upbeat Review #3)",
+      "key": "F Major (I - IV - ii - V)",
+      "bpm": 108,
+      "duration_sec": 64.0,
+      "license": "CC0-1.0 Public Domain / Original Procedural Studio Synthesis (Zero Copyright / No Content-ID)"
+    },
+    {
+      "track_id": "bgm_upbeat_4_happy_kitchen",
+      "filename": "bgm_upbeat_4_happy_kitchen.m4a",
+      "title": "Happy Kitchen & Desk Bounce (Upbeat Review #4)",
+      "key": "D Major (I - V - vi - IV)",
+      "bpm": 120,
+      "duration_sec": 64.0,
+      "license": "CC0-1.0 Public Domain / Original Procedural Studio Synthesis (Zero Copyright / No Content-ID)"
+    }
+  ]
+}
