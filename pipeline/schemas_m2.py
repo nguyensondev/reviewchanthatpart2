@@ -148,11 +148,18 @@ class LLMGeneratedBeat(BaseModel):
     beat_index: int
     beat_type: BeatType
     target_candidate_id: str
-    voiceover_vi: str
-    on_screen_text_vi: str = Field(
-        ..., description="Chữ overlay ngắn gọn trên màn hình, TỐI ĐA 8 TỪ"
+    voiceover_vi: str = Field(
+        ...,
+        description="Lời thoại đọc voiceover BẮT BUỘC viết bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ chuẩn UTF-8, tuyệt đối cấm viết không dấu",
     )
-    visual_instruction_vi: str
+    on_screen_text_vi: str = Field(
+        ...,
+        description="Chữ overlay ngắn gọn trên màn hình, TỐI ĐA 8 TỪ, BẮT BUỘC tiếng Việt CÓ DẤU ĐẦY ĐỦ chuẩn UTF-8",
+    )
+    visual_instruction_vi: str = Field(
+        ...,
+        description="Mô tả cảnh quay bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ",
+    )
 
 
 class LLMGeneratedScriptDraft(BaseModel):
@@ -163,12 +170,18 @@ class LLMGeneratedScriptDraft(BaseModel):
         default="PAIN_POINT_REALITY_CHECK",
         description="Góc tiếp cận kịch bản độc lập để chống trùng lặp cấu trúc",
     )
-    title_vi: str
+    title_vi: str = Field(
+        ...,
+        description="Tiêu đề kịch bản tiếng Việt CÓ DẤU ĐẦY ĐỦ chuẩn UTF-8 (cấm viết không dấu)",
+    )
     hook_title_short_vi: str = Field(
         default="",
-        description="Tiêu đề mở bài cực ngắn TỐI ĐA 30 KÝ TỰ (0-30 ký tự) bằng tiếng Việt có dấu",
+        description="Tiêu đề mở bài cực ngắn TỐI ĐA 30 KÝ TỰ (10-30 ký tự) bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ",
     )
-    selection_rationale_vi: str
+    selection_rationale_vi: str = Field(
+        ...,
+        description="Lý do chọn kịch bản viết bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ",
+    )
     primary_sku_ids: List[str]
     runner_up_sku_ids_referenced: List[str]
     foil_sku_ids_referenced: List[str]
@@ -177,5 +190,8 @@ class LLMGeneratedScriptDraft(BaseModel):
 
 class LLMM2BatchGenerationResponse(BaseModel):
     multi_category_synergy_type: MultiCategorySynergyType
-    synergy_classification_reasoning_vi: str
+    synergy_classification_reasoning_vi: str = Field(
+        ...,
+        description="Giải thích phân loại mối quan hệ bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ chuẩn UTF-8",
+    )
     scripts: List[LLMGeneratedScriptDraft]

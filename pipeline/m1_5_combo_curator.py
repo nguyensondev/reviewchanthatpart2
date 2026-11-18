@@ -47,7 +47,7 @@ from pipeline.schemas_m1_5 import (
     compute_sku_lifecycle_status,
     normalize_sku_key,
 )
-from pipeline.shared_utils import enforce_short_hook_title
+from pipeline.shared_utils import check_vietnamese_diacritics, enforce_short_hook_title
 from pipeline.sku_registry import SKURegistryManager, classify_micro_scene
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +86,10 @@ class M15ComboCuratorEngine:
             if self.registry_mgr.is_in_cooldown(entry.sku_key):
                 continue
             if not entry.youtube_evidence:
+                continue
+            ok_n, _, _ = check_vietnamese_diacritics(entry.product_name_vi)
+            ok_c, _, _ = check_vietnamese_diacritics(entry.honest_caveat_vi)
+            if not (ok_n and ok_c):
                 continue
             scene_key = (entry.domain, entry.micro_scene_id)
             cat_map = by_scene.setdefault(scene_key, {})

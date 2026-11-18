@@ -32,7 +32,7 @@ from pipeline.llm_client import FreeTierGeminiClient
 from pipeline.schemas_m0 import AffiliateListingMatch, DomainId, YouTubeEvidenceClip
 from pipeline.schemas_m1 import EvaluatedCandidateSKU, M1QualifiedSKUsOutput, QualifiedCategoryResult, ScoreBreakdown100
 from pipeline.schemas_m1_5 import M15ComboCuratorOutput
-from pipeline.shared_utils import enforce_short_hook_title
+from pipeline.shared_utils import check_vietnamese_diacritics, enforce_short_hook_title
 from pipeline.sku_registry import SKURegistryManager
 
 OUTPUT_M1_5_PATH = Path(__file__).resolve().parent.parent / "data" / "m1_5_combo_result.json"
@@ -63,8 +63,8 @@ def _trim_onscreen_text(text: str, max_words: int = MAX_ONSCREEN_WORDS) -> str:
     return " ".join(words[:max_words])
 
 
-def _cap_beat_voiceover(text: str, max_words: int = 52) -> str:
-    """Normalize whitespace and ensure complete punctuation without truncating normal 25-48 word beats."""
+def _cap_beat_voiceover(text: str, max_words: int = 42) -> str:
+    """Normalize whitespace and ensure complete punctuation within 24-42 words per beat (~35-52s total)."""
     clean = " ".join(text.strip().split())
     words = clean.split()
     if len(words) <= max_words:
@@ -244,10 +244,10 @@ NGUYÊN TẮC VÀNG: VĂN NÓI ĐỜI THƯỜNG CỦA NGƯỜI THẬT — CẤM 
    - Beat 4 (`HONEST_CAVEAT`): Chuyển ý thẳng thắn, nói rõ nhược điểm thực tế từ `honest_caveat_vi` dưới góc nhìn công bằng (ai sẽ thấy bất tiện, ai dùng vẫn rất ổn — khớp cảnh quay chi tiết bộ phận liên quan).
    - Beat 5 (`VALUE_VERDICT_CTA`): Chốt tự nhiên xem món này hợp với ai ở mức giá ~`estimated_market_price_vnd` và nhắn nhẹ người xem tham khảo link chính hãng ở giỏ hàng/bình luận.
 
-RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
-- NGÔN NGỮ VOICEOVER & TIÊU ĐỀ: BẮT BUỘC viết bằng **tiếng Việt có dấu đầy đủ (UTF-8 chuẩn)**, đúng chính tả, câu văn hoàn chỉnh không cụt ý.
+RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI (ZERO TOLERANCE):
+- NGÔN NGỮ VOICEOVER, PHỤ ĐỀ & TIÊU ĐỀ: BẮT BUỘC 100% viết bằng **tiếng Việt CÓ DẤU ĐẦY ĐỦ (UTF-8 chuẩn)**, đúng chính tả, câu văn hoàn chỉnh không cụt ý. TUYỆT ĐỐI CẤM viết tiếng Việt không dấu (ASCII) ở bất kỳ từ hay câu nào — chỉ cần 1 cụm từ mất dấu là toàn bộ kịch bản bị hủy bỏ vì làm hỏng AI TTS!
 - `target_candidate_id` ở mỗi beat phải dùng đúng chuỗi `candidate_id` có thật trong dữ liệu M1.
-- `on_screen_text_vi`: Ngắn gọn, súc tích, tiếng Việt có dấu, TUYỆT ĐỐI KHÔNG QUÁ 8 TỪ.
+- `on_screen_text_vi`: Ngắn gọn, súc tích, tiếng Việt CÓ DẤU ĐẦY ĐỦ, TUYỆT ĐỐI KHÔNG QUÁ 8 TỪ.
 - KHÔNG ĐƯỢC BỊA THÊM thông số, công suất, thời gian bảo hành hay giá bán khác với dữ liệu M1 đã cho.
 """.strip()
 
@@ -348,7 +348,7 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI:
         total_words = 0
 
         for pos, b in enumerate(sorted_beats, start=1):
-            vo = _cap_beat_voiceover(b.voiceover_vi, max_words=52)
+            vo = _cap_beat_voiceover(b.voiceover_vi, max_words=42)
             wc = len(vo.split()) if vo else 0
             dur = round(min(13.5, max(MIN_BEAT_DURATION_SEC, wc / DEFAULT_SPEAKING_RATE_WPS)), 1)
             start_s = round(cursor_sec, 1)

@@ -20,14 +20,17 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+from pipeline.shared_utils import check_vietnamese_diacritics
+
 T = TypeVar("T", bound=BaseModel)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
-# Verified working Free-Tier model chains (ordered by quality & reliability on nested schemas)
+# Verified working Free-Tier model chains (ordered by quality, latency & Vietnamese UTF-8 accuracy)
 REASONING_MODEL_CHAIN: List[str] = [
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemma-4-31b-it",
@@ -35,10 +38,53 @@ REASONING_MODEL_CHAIN: List[str] = [
 
 EXTRACTION_MODEL_CHAIN: List[str] = [
     "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.1-flash-lite",
     "gemma-4-31b-it",
 ]
+
+MANDATORY_VI_DIACRITIC_RULE = (
+    "\n\n[QUY TẮC NGÔN NGỮ BẮT BUỘC — ZERO TOLERANCE]: "
+    "Tất cả mọi trường văn bản tiếng Việt (`*_vi`, lời thoại `voiceover_vi`, `tts_voiceover_vi`, "
+    "`subtitle_text_vi`, `on_screen_text_vi`, tiêu đề, thông số, ưu nhược điểm) BẮT BUỘC phải viết bằng "
+    "TIẾNG VIỆT CÓ DẤU ĐẦY ĐỦ CHUẨN UTF-8 (ví dụ: 'Chiếc đèn treo màn hình chống chói bảo vệ mắt'). "
+    "TUYỆT ĐỐI CẤM viết tiếng Việt không dấu (ASCII) dù chỉ một câu hay một cụm từ!"
+)
+
+
+def _validate_pydantic_vietnamese_fields(obj: object, path_prefix: str = "") -> List[str]:
+    """
+    Recursively inspect every `*_vi` string/list field in a parsed Pydantic response.
+    Returns a list of human-readable violation strings if any field contains unaccented Vietnamese.
+    """
+    violations: List[str] = []
+    if isinstance(obj, BaseModel):
+        for fname in obj.__class__.model_fields:
+            val = getattr(obj, fname, None)
+            sub_path = f"{path_prefix}.{fname}" if path_prefix else fname
+            if fname.endswith("_vi") or fname in ("key_specs_pairs",):
+                if isinstance(val, str) and val.strip():
+                    ok, _, reason = check_vietnamese_diacritics(val)
+                    if not ok:
+                        violations.append(f"{sub_path}: {reason} -> {val[:80]!r}")
+                elif isinstance(val, list):
+                    for idx, item in enumerate(val):
+                        if isinstance(item, str) and item.strip():
+                            ok, _, reason = check_vietnamese_diacritics(item)
+                            if not ok:
+                                violations.append(f"{sub_path}[{idx}]: {reason} -> {item[:80]!r}")
+                        else:
+                            violations.extend(_validate_pydantic_vietnamese_fields(item, f"{sub_path}[{idx}]"))
+            else:
+                violations.extend(_validate_pydantic_vietnamese_fields(val, sub_path))
+    elif isinstance(obj, list):
+        for idx, item in enumerate(obj):
+            violations.extend(_validate_pydantic_vietnamese_fields(item, f"{path_prefix}[{idx}]"))
+    elif isinstance(obj, dict):
+        for k, val in obj.items():
+            violations.extend(_validate_pydantic_vietnamese_fields(val, f"{path_prefix}.{k}"))
+    return violations
 
 
 def load_env_file(env_path: Path = DEFAULT_ENV_PATH) -> None:
@@ -140,33 +186,49 @@ class FreeTierGeminiClient:
         errors: List[str] = []
 
         for model_name in chain:
+            last_diacritic_err = ""
             for attempt in range(2):
                 self._pace()
                 client = self._get_client()
                 try:
+                    full_sys = (system_instruction or "").strip() + MANDATORY_VI_DIACRITIC_RULE
+                    effective_temp = temperature if attempt == 0 else max(0.1, temperature - 0.1)
                     cfg = types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=schema,
-                        temperature=temperature,
+                        temperature=effective_temp,
+                        system_instruction=full_sys,
                     )
-                    if system_instruction:
-                        cfg.system_instruction = system_instruction
+                    effective_prompt = prompt
+                    if last_diacritic_err:
+                        effective_prompt = (
+                            f"⚠️ CẢNH BÁO SỬA LỖI NGHIÊM TRỌNG: Lần sinh trước bị TỪ CHỐI vì viết tiếng Việt KHÔNG DẤU ({last_diacritic_err}). "
+                            f"BẮT BUỘC viết lại TOÀN BỘ các trường tiếng Việt CÓ DẤU ĐẦY ĐỦ CHUẨN UTF-8!\n\n{prompt}"
+                        )
 
                     self._last_call_ts = time.time()
                     resp = client.models.generate_content(
                         model=model_name,
-                        contents=prompt,
+                        contents=effective_prompt,
                         config=cfg,
                     )
                     raw_text = resp.text or ""
                     cleaned = _clean_json_text(raw_text)
                     parsed = schema.model_validate_json(cleaned)
+                    diacritic_violations = _validate_pydantic_vietnamese_fields(parsed)
+                    if diacritic_violations:
+                        last_diacritic_err = diacritic_violations[0]
+                        raise ValueError(f"DIACRITIC_REJECTED: {last_diacritic_err}")
+
                     if model_name not in self.models_used_history:
                         self.models_used_history.append(model_name)
                     return parsed, model_name
                 except Exception as exc:
-                    err_str = str(exc).splitlines()[0][:200]
+                    err_str = str(exc).splitlines()[0][:240]
                     errors.append(f"{model_name} (try {attempt+1}): {err_str}")
+                    if "DIACRITIC_REJECTED" in err_str:
+                        print(f"[LLM DIACRITIC GUARD] 🚫 Chặn đầu ra mất dấu từ {model_name}: {err_str}", flush=True)
+                        continue
                     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                         self._rotate_key()
                         time.sleep(3.0)

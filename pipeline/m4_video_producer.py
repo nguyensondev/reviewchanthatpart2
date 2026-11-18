@@ -71,7 +71,11 @@ from pipeline.schemas_m4 import (
     SocialPostPack,
     SubShotClauseItem,
 )
-from pipeline.shared_utils import enforce_short_hook_title
+from pipeline.shared_utils import (
+    check_vietnamese_diacritics,
+    enforce_short_hook_title,
+    normalize_vietnamese_for_tts,
+)
 from pipeline.sku_registry import SKURegistryManager
 from pipeline.video_registry import VideoRegistryManager
 
@@ -904,7 +908,7 @@ class M4VideoProducerEngine:
         """Step M4.3: Synthesize one clause using ONLY `locked_voice` (strict 1-voice-per-video lock)."""
         if out_wav.exists() and out_wav.stat().st_size > 1000:
             return _get_audio_duration(out_wav)
-        clean_text = text.strip().rstrip(",;:")
+        clean_text = normalize_vietnamese_for_tts(text).strip().rstrip(",;:")
         if clean_text and clean_text[-1] not in ".!?":
             clean_text += "."
 
@@ -2044,11 +2048,33 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if qs.script_id not in by_id and qs.qaqc_status in ("APPROVED", "APPROVED_WITH_AUTO_PATCH"):
                 by_id[qs.script_id] = qs
 
-        eligible = [
-            s
-            for s in by_id.values()
-            if (not target_script_id or s.script_id == target_script_id)
-        ]
+        # Hard Pre-Render Vietnamese Diacritic Gate: refuse & purge any poisoned unaccented script before TTS!
+        valid_eligible: List[AuditedScriptItem] = []
+        for s in by_id.values():
+            if target_script_id and s.script_id != target_script_id:
+                continue
+            bad_fields: List[str] = []
+            for lbl, val in [
+                ("title_vi", s.title_vi),
+                ("hook_title_short_vi", s.hook_title_short_vi),
+                *[(f"beat#{b.beat_index}.tts_voiceover_vi", b.tts_voiceover_vi) for b in s.beats],
+                *[(f"beat#{b.beat_index}.subtitle_text_vi", b.subtitle_text_vi) for b in s.beats],
+                *[(f"beat#{b.beat_index}.on_screen_text_vi", b.on_screen_text_vi) for b in s.beats],
+            ]:
+                ok_d, _, rsn_d = check_vietnamese_diacritics(val)
+                if not ok_d:
+                    bad_fields.append(f"{lbl} ({rsn_d})")
+            if bad_fields:
+                print(
+                    f"[M4 DIACRITIC GUARD] 🚫 Chặn & xóa vĩnh viễn kịch bản mất dấu tiếng Việt `{s.script_id}`: {bad_fields[0]}",
+                    flush=True,
+                )
+                self.video_registry.delete_entry(s.script_id)
+                self.video_registry.purge_script_from_m2_m3_files(s.script_id)
+                continue
+            valid_eligible.append(s)
+
+        eligible = valid_eligible
 
         used_today, _, existing_ids = qm.get_video_quota_status()
         skipped_ids: List[str] = []

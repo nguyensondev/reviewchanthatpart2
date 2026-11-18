@@ -36,6 +36,7 @@ from pipeline.daily_quota import DailyQuotaManager
 from pipeline.m4_video_producer import MAX_CONTINUOUS_SHOT_SEC
 from pipeline.m5_publisher import M5PublisherEngine
 from pipeline.publish_packager import PublishPackager
+from pipeline.shared_utils import check_vietnamese_diacritics, normalize_vietnamese_for_tts
 from pipeline.shopee_browser_link_resolver import (
     ShopeeAutoAffiliateResolver,
     score_and_select_best_offer,
@@ -254,6 +255,93 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
     assert len(intros) >= 15
     print(
         f"  [PASS] Kho 20 mẫu câu mở đầu Comment hoàn toàn khác biệt (20/20 câu độc nhất, 0 trùng 3 từ đầu) + giới hạn 1 video/phiên + trễ 24-62s: OK.",
+        flush=True,
+    )
+
+    # 4. Zero-Tolerance Unaccented Vietnamese Gate across LLM Client, M2, M3 QA/QC & M4 TTS
+    from pipeline.llm_client import _validate_pydantic_vietnamese_fields
+    from pipeline.m3_qaqc import M3QAQCEngine
+    from pipeline.schemas_m2 import LLMGeneratedBeat, LLMGeneratedScriptDraft, ScriptBeatSegment, ScriptDraftItem
+    from pipeline.schemas_m0 import YouTubeEvidenceClip
+
+    # Currency 'đ' trick ("420.000đ") + partial unaccented clauses MUST be caught 100%
+    assert check_vietnamese_diacritics("Voi muc gia khoang 420.000đ, chiec den nay cuc dang mua.")[0] is False
+    assert check_vietnamese_diacritics("HET MOI CO TAY KHI DUNG CHUOT")[0] is False
+    assert check_vietnamese_diacritics("Cầm chiếc chuột này rất thích, nhung kich thuoc hoi nho so voi tay nam gioi.")[0] is False
+    assert check_vietnamese_diacritics("Cầm chiếc chuột Logitech Lift Vertical này trên tay mới hiểu vì sao nó đáng giá.")[0] is True
+
+    bad_llm_draft = LLMGeneratedScriptDraft(
+        script_format="SINGLE_SKU_DEEP_DIVE",
+        domain="TECH_DESK",
+        category_id="ergonomic_vertical_mouse",
+        narrative_angle="PAIN_POINT_REALITY_CHECK",
+        title_vi="Review chuot cong thai hoc Logitech Lift Vertical",
+        hook_title_short_vi="Het moi co tay ngay",
+        selection_rationale_vi="Phan tich chuot doc chong moi co tay",
+        primary_sku_ids=["logitech_vertical_lift"],
+        runner_up_sku_ids_referenced=[],
+        foil_sku_ids_referenced=[],
+        beats=[
+            LLMGeneratedBeat(
+                beat_index=1,
+                beat_type="HOOK_FOIL_WARNING",
+                target_candidate_id="logitech_vertical_lift",
+                voiceover_vi="Ngoi may tinh ca ngay ma co tay dau nhuc voi gia 420.000đ.",
+                on_screen_text_vi="Chuot re truot lien tuc",
+                visual_instruction_vi="Canh quay ban lam viec",
+            )
+        ],
+    )
+    assert len(_validate_pydantic_vietnamese_fields(bad_llm_draft)) >= 4
+
+    fake_clip = YouTubeEvidenceClip(
+        video_id="kWEbfrHi65A",
+        url="https://www.youtube.com/watch?v=kWEbfrHi65A",
+        title="Lift",
+        channel="Logitech",
+        duration_sec=60,
+    )
+    poisoned_m2_draft = ScriptDraftItem(
+        script_id="s_poisoned_unaccented",
+        script_format="SINGLE_SKU_DEEP_DIVE",
+        domain="TECH_DESK",
+        category_id="ergonomic_vertical_mouse",
+        narrative_angle="PAIN_POINT_REALITY_CHECK",
+        title_vi="Review chuot cong thai hoc Logitech Lift Vertical",
+        hook_title_short_vi="Het moi co tay",
+        hook_preview_vi="Ngoi may tinh ca ngay...",
+        selection_rationale_vi="Test",
+        primary_sku_ids=["logitech_vertical_lift"],
+        total_duration_sec=35.0,
+        total_word_count=130,
+        average_speaking_rate_wps=3.7,
+        beats=[
+            ScriptBeatSegment(
+                beat_index=i,
+                beat_type="HOOK_FOIL_WARNING",
+                start_sec=(i - 1) * 7.0,
+                end_sec=i * 7.0,
+                duration_sec=7.0,
+                target_candidate_id="logitech_vertical_lift",
+                voiceover_vi="Ngoi may tinh ca ngay ma co tay cu nhuc moi vi dung chuot re 120.000đ kem chat luong.",
+                word_count=26,
+                estimated_speaking_rate_wps=3.7,
+                on_screen_text_vi="Chuot re truot con tro",
+                visual_instruction_vi="Canh quay",
+                source_youtube_clip=fake_clip,
+            )
+            for i in range(1, 6)
+        ],
+    )
+    l1_issues, _ = M3QAQCEngine._run_layer1_technical_checks(M3QAQCEngine.__new__(M3QAQCEngine), poisoned_m2_draft)
+    diacritic_rewrites = [
+        iss for iss in l1_issues if iss.issue_category == "DIACRITIC_OR_SPELLING" and iss.severity == "NEEDS_M2_REWRITE"
+    ]
+    assert len(diacritic_rewrites) >= 10, f"Expected M3 Layer-1 to hard-fail all unaccented fields, got {diacritic_rewrites}"
+    tts_spoken = normalize_vietnamese_for_tts("Giá ~1.850.000đ, góc 57°, sai số 0.1g")
+    assert "1 triệu 850 nghìn đồng" in tts_spoken and "57 độ" in tts_spoken and "0 phẩy 1 gam" in tts_spoken
+    print(
+        "  [PASS] Cổng chặn Tiếng Việt Không Dấu 5 tầng (LLM Client + M2 + M3 Hard Gate + M4 Pre-TTS + Chuẩn hóa đọc số TTS): OK.",
         flush=True,
     )
 

@@ -918,7 +918,8 @@ Mỗi nhóm công năng phải có:
             "1. BẮT BUỘC phải có ít nhất **2 đến 3 thương hiệu có tên tuổi KHÁC NHAU** cạnh tranh trực tiếp trong cùng nhóm công năng (ví dụ với đồ bếp: Lock&Lock vs Inochi vs Elmich / Bear / Kai / Joseph Joseph; với đồ công nghệ: Ugreen vs Baseus vs HyperWork / Anker / Logitech / Orico).\n"
             "2. BẮT BUỘC phải có ít nhất **1 ứng viên thuộc nhóm `OEM_GENERIC`** (hàng không thương hiệu / phổ thông giá rẻ trên sàn) để Module M1 làm mốc đối chiếu giá trung vị và chất lượng.\n"
             "3. Nếu trong dữ liệu có tin đăng gộp nhiều mã lập lờ (ví dụ tiêu đề ghi chung CKS321 / EJM416 / nhiều dung tích để mồi giá rẻ) hoặc mẫu có lỗi nghiêm trọng, hãy tách riêng hoặc gắn đúng `archetype` / `caveat_severity`.\n"
-            "4. Mọi ứng viên ĐỀU PHẢI CÓ `honest_caveat_vi` (nhược điểm thực tế hoặc giới hạn sử dụng thật, không được khen 100%)."
+            "4. Mọi ứng viên ĐỀU PHẢI CÓ `honest_caveat_vi` (nhược điểm thực tế hoặc giới hạn sử dụng thật, không được khen 100%).\n"
+            "5. BẮT BUỘC 100% TIẾNG VIỆT CÓ DẤU ĐẦY ĐỦ CHUẨN UTF-8: Kể cả khi tiêu đề trên sàn TMĐT / YouTube viết không dấu, bạn BẮT BUỘC phải chuyển hóa `product_name_vi`, `key_specs_pairs`, `highlight_pros_vi`, `honest_caveat_vi` sang tiếng Việt CÓ DẤU ĐẦY ĐỦ."
         )
 
         prompt = f"""

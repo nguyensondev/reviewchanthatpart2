@@ -25,7 +25,11 @@ from typing import Dict, List, Optional, Tuple
 from pipeline.core_resilience import atomic_write_text
 from pipeline.daily_quota import DailyQuotaManager, MAX_FINAL_SCRIPTS_PER_DAY
 from pipeline.llm_client import FreeTierGeminiClient
-from pipeline.shared_utils import enforce_short_hook_title
+from pipeline.shared_utils import (
+    check_vietnamese_diacritics,
+    enforce_short_hook_title,
+    normalize_vietnamese_for_tts,
+)
 from pipeline.schemas_m1 import M1QualifiedSKUsOutput
 from pipeline.schemas_m1_5 import normalize_sku_key
 from pipeline.schemas_m2 import M2ScriptDraftsOutput, ScriptDraftItem
@@ -320,6 +324,30 @@ class M3QAQCEngine:
                 )
             )
 
+        ok_title, _, title_reason = check_vietnamese_diacritics(draft.title_vi)
+        if not ok_title:
+            issues.append(
+                QAQCIssueItem(
+                    issue_category="DIACRITIC_OR_SPELLING",
+                    severity="NEEDS_M2_REWRITE",
+                    beat_index=None,
+                    description_vi=f"Tiêu đề kịch bản bị mất dấu tiếng Việt ({title_reason}).",
+                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE bắt buộc M2 viết lại bằng tiếng Việt có dấu đầy đủ.",
+                )
+            )
+        if draft.hook_title_short_vi:
+            ok_hook, _, hook_reason = check_vietnamese_diacritics(draft.hook_title_short_vi)
+            if not ok_hook:
+                issues.append(
+                    QAQCIssueItem(
+                        issue_category="DIACRITIC_OR_SPELLING",
+                        severity="NEEDS_M2_REWRITE",
+                        beat_index=1,
+                        description_vi=f"Hook mở bài 2s đầu bị mất dấu tiếng Việt ({hook_reason}).",
+                        resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE bắt buộc M2 viết lại bằng tiếng Việt có dấu đầy đủ.",
+                    )
+                )
+
         banned_ai_phrases = (
             "mẫu á quân",
             "mẫu quán quân",
@@ -359,14 +387,32 @@ class M3QAQCEngine:
                         resolution_applied_vi="Yêu cầu M2 viết lại phân cảnh này đầy đặn (26–40 từ) có lời dẫn tự nhiên.",
                     )
                 )
-            if len(beat.voiceover_vi.strip()) >= 15 and not _VI_ACCENTED_RE.search(beat.voiceover_vi):
+
+            ok_vo, _, vo_reason = check_vietnamese_diacritics(beat.voiceover_vi)
+            if not ok_vo:
                 issues.append(
                     QAQCIssueItem(
                         issue_category="DIACRITIC_OR_SPELLING",
-                        severity="WARNING_AUTO_PATCHED",
+                        severity="NEEDS_M2_REWRITE",
                         beat_index=beat.beat_index,
-                        description_vi="Lời thoại bị mất dấu tiếng Việt, sẽ gây lỗi phát âm AI TTS.",
-                        resolution_applied_vi="Khôi phục đầy đủ dấu tiếng Việt chuẩn UTF-8 ở tầng Auto-Patch.",
+                        description_vi=(
+                            f"Lời thoại phân cảnh #{beat.beat_index} bị mất dấu tiếng Việt ({vo_reason}) -> cấm tuyệt đối đưa vào AI TTS!"
+                        ),
+                        resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE bắt buộc M2 viết lại 100% tiếng Việt có dấu đầy đủ.",
+                    )
+                )
+
+            ok_os, _, os_reason = check_vietnamese_diacritics(beat.on_screen_text_vi)
+            if not ok_os:
+                issues.append(
+                    QAQCIssueItem(
+                        issue_category="DIACRITIC_OR_SPELLING",
+                        severity="NEEDS_M2_REWRITE",
+                        beat_index=beat.beat_index,
+                        description_vi=(
+                            f"Chữ hiển thị màn hình phân cảnh #{beat.beat_index} bị mất dấu tiếng Việt ({os_reason})."
+                        ),
+                        resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE bắt buộc M2 viết lại 100% tiếng Việt có dấu đầy đủ.",
                     )
                 )
 
@@ -455,10 +501,11 @@ class M3QAQCEngine:
             "5. CHỐNG GƯỢNG ÉP COMBO (`FORCED_COMBO_LOGIC`): Nếu hai SKU cùng công năng khác cỡ mà ép mua cả hai thay vì so sánh chọn 1, gắn `FORCED_COMBO_LOGIC` (`severity=\"NEEDS_M2_REWRITE\"`).\n"
             "6. NGƯỠNG ĐẬU KHẮT KHE (`>= 82.0/100` & `needs_m2_rewrite = false`): Chỉ khi kịch bản đã thực sự cuốn hút, đầy đủ highlight của SKU, lời dẫn mượt mà, đúng sự thật 100% và có nhược điểm công tâm mới được đặt `needs_m2_rewrite = false` và tổng điểm `>= 82.0`. Nếu `needs_m2_rewrite = true`, BẮT BUỘC viết `rewrite_instructions_for_m2_vi` thật chi tiết (chỉ rõ từng beat cần sửa gì để M2 viết lại không lặp lại lỗi cũ).\n"
             "7. TÁCH ĐÔI TTS VOICEOVER & PHỤ ĐỀ HIỂN THỊ (BẮT BUỘC ĐIỀN ĐỦ 5 BEAT TRONG `beats_patched`):\n"
-            "   - `tts_voiceover_vi`: Văn nói tiếng Việt CÓ DẤU ĐẦY ĐỦ tự nhiên cho máy đọc (VD: 'một trăm tám mươi mi-li-lít', 'bốn trăm hai mươi nghìn đồng').\n"
-            "   - `subtitle_text_vi`: BẮT BUỘC LÀ CÂU PHỤ ĐỀ ĐẦY ĐỦ NỘI DUNG KHỚP VỚI `tts_voiceover_vi` (TUYỆT ĐỐI KHÔNG chép `on_screen_text_vi` vào đây!), chỉ đổi số/đơn vị sang ký hiệu gọn (`180ml`, `900ml`, `89k`, `420k`, `1,85tr`, `57°`, `4000 DPI`, `Inox 304`).\n"
-            "   - `on_screen_text_vi`: Chữ tiêu đề ngắn gọn tối đa 8 từ, tiếng Việt có dấu.\n"
-            "   - `was_auto_patched`: Đặt `true` nếu beat đó có lỗi thực tế/nhược điểm/diễn đạt đã được chỉnh lại; `false` nếu nội dung gốc đã chuẩn."
+            "   - `tts_voiceover_vi`: Văn nói tiếng Việt CÓ DẤU ĐẦY ĐỦ 100% tự nhiên cho máy đọc (VD: 'một trăm tám mươi mi li lít', 'bốn trăm hai mươi nghìn đồng').\n"
+            "   - `subtitle_text_vi`: BẮT BUỘC LÀ CÂU PHỤ ĐỀ ĐẦY ĐỦ NỘI DUNG CÓ DẤU TIẾNG VIỆT KHỚP VỚI `tts_voiceover_vi` (TUYỆT ĐỐI KHÔNG chép `on_screen_text_vi` vào đây!), chỉ đổi số/đơn vị sang ký hiệu gọn (`180ml`, `900ml`, `89k`, `420k`, `1,85tr`, `57°`, `4000 DPI`, `Inox 304`).\n"
+            "   - `on_screen_text_vi`: Chữ tiêu đề ngắn gọn tối đa 8 từ, tiếng Việt CÓ DẤU ĐẦY ĐỦ.\n"
+            "   - `was_auto_patched`: Đặt `true` nếu beat đó có lỗi thực tế/nhược điểm/mất dấu/diễn đạt đã được chỉnh lại; `false` nếu nội dung gốc đã chuẩn.\n"
+            "8. CỔNG CHẶN TIẾNG VIỆT KHÔNG DẤU (`DIACRITIC_OR_SPELLING` — ZERO TOLERANCE): Nếu bất kỳ câu thoại `voiceover_vi`, `on_screen_text_vi` hay `title_vi` nào viết tiếng Việt không dấu hoặc mất dấu từng cụm từ, BẮT BUỘC gắn `DIACRITIC_OR_SPELLING` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `tts_and_visual_readiness_score = 0.0`, đặt `needs_m2_rewrite = true`!"
         )
 
         prompt = f"""
@@ -555,23 +602,34 @@ Hãy chấm điểm khắt khe, khách quan và xuất JSON theo đúng schema `
                 patch = patch_by_idx.get(b.beat_index)
                 if patch:
                     was_patched = bool(patch.was_auto_patched)
-                    if was_patched:
-                        tts_vo = _sanitize_brand_and_tech_terms(
-                            " ".join(patch.tts_voiceover_vi.strip().split()) or b.voiceover_vi
-                        )
+                    patch_vo_clean = _sanitize_brand_and_tech_terms(" ".join(patch.tts_voiceover_vi.strip().split()))
+                    patch_vo_ok, _, _ = check_vietnamese_diacritics(patch_vo_clean)
+                    if was_patched and patch_vo_clean and patch_vo_ok:
+                        raw_tts_vo = patch_vo_clean
                         candidate_sub = _sanitize_brand_and_tech_terms(patch.subtitle_text_vi.strip())
-                        if not candidate_sub or len(candidate_sub.split()) < 0.6 * max(1, len(tts_vo.split())):
-                            candidate_sub = tts_vo
+                        if not candidate_sub or len(candidate_sub.split()) < 0.6 * max(1, len(raw_tts_vo.split())):
+                            candidate_sub = raw_tts_vo
                         sub_txt = _normalize_subtitle_units(candidate_sub)
+                    elif patch_vo_clean and patch_vo_ok and len(patch_vo_clean.split()) >= 0.75 * max(1, len(b.voiceover_vi.split())):
+                        # Preserve M3 LLM's spoken TTS expansion while keeping M2's verified wording for subtitles
+                        raw_tts_vo = patch_vo_clean
+                        cand_sub = _sanitize_brand_and_tech_terms(patch.subtitle_text_vi.strip())
+                        cand_sub_ok, _, _ = check_vietnamese_diacritics(cand_sub)
+                        if cand_sub and cand_sub_ok and len(cand_sub.split()) >= 0.7 * max(1, len(b.voiceover_vi.split())):
+                            sub_txt = _normalize_subtitle_units(cand_sub)
+                        else:
+                            sub_txt = _normalize_subtitle_units(b.voiceover_vi)
                     else:
-                        tts_vo = _sanitize_brand_and_tech_terms(b.voiceover_vi)
+                        raw_tts_vo = _sanitize_brand_and_tech_terms(b.voiceover_vi)
                         sub_txt = _normalize_subtitle_units(b.voiceover_vi)
+                    tts_vo = normalize_vietnamese_for_tts(raw_tts_vo)
                     onscreen = _trim_onscreen_text(
                         _sanitize_brand_and_tech_terms(patch.on_screen_text_vi or b.on_screen_text_vi),
                         MAX_ONSCREEN_WORDS,
                     )
                 else:
-                    tts_vo = _sanitize_brand_and_tech_terms(b.voiceover_vi)
+                    raw_tts_vo = _sanitize_brand_and_tech_terms(b.voiceover_vi)
+                    tts_vo = normalize_vietnamese_for_tts(raw_tts_vo)
                     sub_txt = _normalize_subtitle_units(b.voiceover_vi)
                     onscreen = _trim_onscreen_text(_sanitize_brand_and_tech_terms(b.on_screen_text_vi), MAX_ONSCREEN_WORDS)
                     was_patched = False
@@ -606,11 +664,67 @@ Hãy chấm điểm khắt khe, khách quan và xuất JSON theo đúng schema `
                     )
                 )
 
+            patched_title = (
+                llm_res.patched_title_vi.strip()
+                if llm_res and llm_res.patched_title_vi and llm_res.patched_title_vi.strip()
+                else draft.title_vi
+            )
+            raw_short_hook = (
+                llm_res.patched_hook_title_short_vi.strip()
+                if llm_res and getattr(llm_res, "patched_hook_title_short_vi", "") and llm_res.patched_hook_title_short_vi.strip()
+                else (draft.hook_title_short_vi or (audited_beats[0].on_screen_text_vi if audited_beats else "") or patched_title)
+            )
+            short_hook = enforce_short_hook_title(raw_short_hook, max_chars=30)
+
+            # HARD POST-AUDIT PYTHON DIACRITIC GATE (IMPOSSIBLE TO BYPASS EVEN IF LLM SCORED 100/100)
+            post_diacritic_failures: List[Tuple[Optional[int], str]] = []
+            for label_txt, b_idx, val_txt in [
+                ("title_vi", None, patched_title),
+                ("hook_title_short_vi", 1, short_hook),
+                *[
+                    (f"Beat #{ab.beat_index} tts_voiceover_vi", ab.beat_index, ab.tts_voiceover_vi)
+                    for ab in audited_beats
+                ],
+                *[
+                    (f"Beat #{ab.beat_index} subtitle_text_vi", ab.beat_index, ab.subtitle_text_vi)
+                    for ab in audited_beats
+                ],
+                *[
+                    (f"Beat #{ab.beat_index} on_screen_text_vi", ab.beat_index, ab.on_screen_text_vi)
+                    for ab in audited_beats
+                ],
+            ]:
+                ok_d, _, rsn_d = check_vietnamese_diacritics(val_txt)
+                if not ok_d:
+                    post_diacritic_failures.append((b_idx, f"{label_txt}: {rsn_d}"))
+
+            if post_diacritic_failures:
+                t_score = 0.0
+                total_qaqc = round(f_score + h_score + n_score + t_score, 2)
+                score_breakdown = QAQCScoreBreakdown100(
+                    fact_accuracy_score=f_score,
+                    honest_caveat_score=h_score,
+                    natural_tone_and_logic_score=n_score,
+                    tts_and_visual_readiness_score=0.0,
+                    total_qaqc_score_100=total_qaqc,
+                )
+                for b_idx, fail_msg in post_diacritic_failures:
+                    combined_issues.append(
+                        QAQCIssueItem(
+                            issue_category="DIACRITIC_OR_SPELLING",
+                            severity="NEEDS_M2_REWRITE",
+                            beat_index=b_idx,
+                            description_vi=f"[HARD GATE BLOCK] Phát hiện tiếng Việt không dấu sau kiểm định ({fail_msg}).",
+                            resolution_applied_vi="Chặn tuyệt đối không cho qua M4; bắt buộc M2 viết lại tiếng Việt có dấu chuẩn UTF-8.",
+                        )
+                    )
+
             has_critical_issue = l1_crit or any(
                 i.severity == "CRITICAL_REJECT" for i in combined_issues
             )
             has_rewrite_issue = (
-                (llm_res is not None and bool(getattr(llm_res, "needs_m2_rewrite", False)))
+                bool(post_diacritic_failures)
+                or (llm_res is not None and bool(getattr(llm_res, "needs_m2_rewrite", False)))
                 or total_qaqc < MIN_PASSING_QAQC_SCORE
                 or any(i.severity == "NEEDS_M2_REWRITE" for i in combined_issues)
             )
@@ -623,7 +737,14 @@ Hãy chấm điểm khắt khe, khách quan và xuất JSON theo đúng schema `
                 if llm_res and getattr(llm_res, "rewrite_instructions_for_m2_vi", "")
                 else ""
             )
-            if has_rewrite_issue and not rewrite_instructions_vi:
+            if post_diacritic_failures:
+                diacritic_note = (
+                    "LỖI NGHIÊM TRỌNG BẮT BUỘC SỬA NGAY: Kịch bản bị mất dấu tiếng Việt ("
+                    + "; ".join(m for _, m in post_diacritic_failures[:4])
+                    + "). BẮT BUỘC viết lại 100% bằng tiếng Việt CÓ DẤU ĐẦY ĐỦ chuẩn UTF-8!"
+                )
+                rewrite_instructions_vi = f"{diacritic_note} {rewrite_instructions_vi}".strip()
+            elif has_rewrite_issue and not rewrite_instructions_vi:
                 issue_notes = "; ".join(
                     f"[Beat {i.beat_index or 'All'} - {i.issue_category}] {i.description_vi} ({i.resolution_applied_vi})"
                     for i in combined_issues
@@ -656,18 +777,6 @@ Hãy chấm điểm khắt khe, khách quan và xuất JSON theo đúng schema `
                 + (f" | Lý do cần viết lại: {rewrite_instructions_vi[:120]}..." if status == "FAILED_NEEDS_REWRITE" else ""),
                 flush=True,
             )
-
-            patched_title = (
-                llm_res.patched_title_vi.strip()
-                if llm_res and llm_res.patched_title_vi and llm_res.patched_title_vi.strip()
-                else draft.title_vi
-            )
-            raw_short_hook = (
-                llm_res.patched_hook_title_short_vi.strip()
-                if llm_res and getattr(llm_res, "patched_hook_title_short_vi", "") and llm_res.patched_hook_title_short_vi.strip()
-                else (draft.hook_title_short_vi or (audited_beats[0].on_screen_text_vi if audited_beats else "") or patched_title)
-            )
-            short_hook = enforce_short_hook_title(raw_short_hook, max_chars=30)
 
             audited_scripts.append(
                 AuditedScriptItem(

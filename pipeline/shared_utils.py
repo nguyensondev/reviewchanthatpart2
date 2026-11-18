@@ -30,6 +30,196 @@ def strip_accents(s: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
 
 
+_VI_DIACRITIC_CHAR_RE = re.compile(
+    r"[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
+    r"ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]"
+)
+
+# Tokens that are orthographically IMPOSSIBLE in standard accented Vietnamese AND are not English words.
+# Their presence proves 100% that Vietnamese text was written without diacritics (tiếng Việt không dấu).
+_FORBIDDEN_UNACCENTED_VI_WORDS: set[str] = {
+    "chiec", "thiet", "nhieu", "hieu", "diem", "kiem", "nghiem", "viec", "dien", "tieng",
+    "khien", "nghieng", "biet", "nhiet", "tuyet", "lieu", "trieu", "dieu", "kieu",
+    "duoc", "nuoc", "truoc", "nhuoc", "nguoi", "muoi", "luoi", "chuot", "truot", "muot",
+    "vuot", "suot", "thuong", "luong", "truong", "huong", "suong", "cuon", "luon",
+    "khong", "nhung", "khoang", "nhua", "giup", "chinh", "chong", "ngoi", "giua", "hoac",
+    "phai", "khoi", "duoi", "cung_cap", "san", "pham", "chuan", "khoe", "gon", "nhe",
+} - {"san"}  # keep 'san' out in case of proper names like SanDisk
+
+# Known English / brand / tech / unit tokens allowed without Vietnamese diacritics
+_KNOWN_ASCII_TECH_BRAND_TOKENS: set[str] = {
+    "usb", "type", "led", "oem", "dpi", "hdmi", "gan", "abs", "ps", "pp", "tritan", "rgb",
+    "lcd", "oled", "ips", "va", "bluetooth", "wifi", "smartwheel", "logi", "bolt", "unifying",
+    "logitech", "lift", "vertical", "mx", "master", "anywhere", "keys", "pebble",
+    "baseus", "iwok", "wok", "tanita", "ugreen", "anker", "hyperwork", "orico", "keychron",
+    "akko", "xiaomi", "mijia", "deerma", "lock", "locknlock", "inochi", "elmich", "bear",
+    "kai", "wmf", "joseph", "tefal", "philips", "panasonic", "bluestone", "sunhouse",
+    "delites", "hafele", "timemore", "hario", "fellow", "tescoma", "ikea", "muji",
+    "series", "inox", "silicon", "silicone", "matte", "low", "profile", "switch", "keycap",
+    "wireless", "hub", "dock", "docking", "arm", "stand", "setup", "desk", "laptop",
+    "macbook", "mac", "pc", "ipad", "iphone", "android", "windows", "typec", "usbc",
+    "pd", "qc", "mah", "watt", "ml", "mm", "cm", "kg", "gram", "calo", "kcal",
+    "cafe", "coffee", "espresso", "matcha", "latte", "steak", "salad", "decor",
+    "combo", "solo", "review", "reviewer", "unbox", "test", "video", "clip", "shorts",
+    "reels", "tiktok", "youtube", "facebook", "shopee", "mall", "shop", "link", "bio",
+    "ok", "model", "size", "mini", "pro", "max", "plus", "ultra", "air", "auto", "smart",
+    "touch", "sensor", "timer", "mode", "app", "full", "hd", "uhd", "fps", "hz", "cri", "ra",
+}
+
+
+def check_vietnamese_diacritics(
+    text: str,
+    min_words_for_ratio: int = 4,
+    min_accent_ratio: float = 0.40,
+) -> Tuple[bool, float, str]:
+    """
+    Strictly verify that `text` is written in proper accented UTF-8 Vietnamese (tiếng Việt có dấu đầy đủ).
+    Catches:
+      1. Fully unaccented Vietnamese (`tieng Viet khong dau`), even if tricked by `420.000đ` currency `đ`.
+      2. Partially unaccented clauses slipped inside a beat (`>= 6` consecutive unaccented non-brand words).
+      3. Orthographically impossible unaccented Vietnamese tokens (`chiec`, `chuot`, `khong`, `duoc`, `thiet`, ...).
+    Returns `(is_valid, accent_ratio, failure_reason_vi)`.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return True, 1.0, ""
+
+    # Strip currency 'đ' attached to numbers (e.g., 420.000đ, 89k, 1,85tr) so 'đ' in prices never fakes accents
+    cleaned = re.sub(r"\b\d[\d.,]*\s*(?:đ|vnd|vnđ|k|tr|ml|mm|cm|g|kg|w|v|mah|dpi|hz)\b", " ", raw, flags=re.IGNORECASE)
+    # Extract pure alphabetic tokens (length >= 2, no digits)
+    raw_tokens = re.findall(r"[^\W\d_]{2,}", cleaned, flags=re.UNICODE)
+
+    vi_eval_tokens: List[str] = []
+    accented_count = 0
+    consecutive_unaccented = 0
+    max_consecutive_unaccented = 0
+    forbidden_hits: List[str] = []
+
+    for tok in raw_tokens:
+        low = tok.lower()
+        if low in _KNOWN_ASCII_TECH_BRAND_TOKENS:
+            continue
+        has_accent = bool(_VI_DIACRITIC_CHAR_RE.search(tok))
+        vi_eval_tokens.append(tok)
+        if has_accent:
+            accented_count += 1
+            consecutive_unaccented = 0
+        else:
+            consecutive_unaccented += 1
+            if consecutive_unaccented > max_consecutive_unaccented:
+                max_consecutive_unaccented = consecutive_unaccented
+            if low in _FORBIDDEN_UNACCENTED_VI_WORDS and low not in forbidden_hits:
+                forbidden_hits.append(low)
+
+    if forbidden_hits:
+        ratio = round(accented_count / max(1, len(vi_eval_tokens)), 3)
+        return (
+            False,
+            ratio,
+            f"Phát hiện từ tiếng Việt mất dấu ({', '.join(repr(w) for w in forbidden_hits[:6])})",
+        )
+
+    if not vi_eval_tokens:
+        return True, 1.0, ""
+
+    ratio = round(accented_count / len(vi_eval_tokens), 3)
+
+    if max_consecutive_unaccented >= 6:
+        return (
+            False,
+            ratio,
+            f"Có chuỗi {max_consecutive_unaccented} từ liên tiếp không dấu (tỷ lệ dấu {ratio * 100:.0f}%)",
+        )
+
+    if len(vi_eval_tokens) >= min_words_for_ratio and ratio < min_accent_ratio:
+        return (
+            False,
+            ratio,
+            f"Tỷ lệ từ tiếng Việt có dấu quá thấp ({accented_count}/{len(vi_eval_tokens)} = {ratio * 100:.0f}% < {min_accent_ratio * 100:.0f}%)",
+        )
+
+    if 2 <= len(vi_eval_tokens) < min_words_for_ratio and accented_count == 0:
+        return (
+            False,
+            0.0,
+            f"Cụm tiêu đề ngắn ({len(vi_eval_tokens)} từ) hoàn toàn không có dấu tiếng Việt",
+        )
+
+    return True, ratio, ""
+
+
+def normalize_vietnamese_for_tts(text: str) -> str:
+    """
+    Convert compact visual symbols/prices/units inside spoken `tts_voiceover_vi` into natural
+    Vietnamese words so TTS engines never misread `1.850.000đ`, `~420k`, `57°`, `0.1g`, `USB-C`.
+    """
+    s = " ".join((text or "").strip().split())
+    if not s:
+        return s
+
+    # Remove tilde '~' before numbers so TTS doesn't read "ngã"
+    s = re.sub(r"~\s*(?=\d)", "", s)
+
+    # Exact formatted VND prices like 1.850.000đ or 420.000đ or 89.000đ
+    def _repl_full_vnd(m: re.Match[str]) -> str:
+        digits = re.sub(r"[^\d]", "", m.group(1))
+        if not digits:
+            return m.group(0)
+        val = int(digits)
+        if val >= 1_000_000:
+            tr = val // 1_000_000
+            rem_k = (val % 1_000_000) // 1000
+            if rem_k == 0:
+                return f"{tr} triệu đồng"
+            return f"{tr} triệu {rem_k} nghìn đồng"
+        if val >= 1000:
+            return f"{val // 1000} nghìn đồng"
+        return f"{val} đồng"
+
+    s = re.sub(r"\b(\d{1,3}(?:[.,]\d{3})+)\s*(?:đ|vnđ|vnd)\b", _repl_full_vnd, s, flags=re.IGNORECASE)
+
+    # Shorthand millions like 1,85tr or 1.8tr
+    def _repl_tr(m: re.Match[str]) -> str:
+        tr = int(m.group(1))
+        dec = m.group(2)
+        if not dec:
+            return f"{tr} triệu"
+        k_val = int((dec + "000")[:3])
+        return f"{tr} triệu {k_val} nghìn" if k_val > 0 else f"{tr} triệu"
+
+    s = re.sub(r"\b(\d+)(?:[.,](\d{1,3}))?\s*tr\b", _repl_tr, s, flags=re.IGNORECASE)
+
+    # Shorthand thousands like 420k, 89k
+    s = re.sub(r"\b(\d+)\s*k\b", r"\1 nghìn", s, flags=re.IGNORECASE)
+
+    # Decimals + units like 0.1g or 0,1g
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*g\b", r"\1 phẩy \2 gam", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*kg\b", r"\1 phẩy \2 ký", s, flags=re.IGNORECASE)
+
+    # Ranges + units like 3-6kg or 60-100°C
+    s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*kg\b", r"\1 đến \2 ký", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*°\s*c\b", r"\1 đến \2 độ C", s, flags=re.IGNORECASE)
+
+    # Dimensions like 125x142mm
+    s = re.sub(r"\b(\d+)\s*[x×]\s*(\d+)\s*mm\b", r"\1 nhân \2 mi li mét", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*[x×]\s*(\d+)\s*cm\b", r"\1 nhân \2 xen ti mét", s, flags=re.IGNORECASE)
+
+    # Standalone units attached to numbers
+    s = re.sub(r"(\d+)\s*°\s*c\b", r"\1 độ C", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+)\s*°", r"\1 độ", s)
+    s = re.sub(r"\b(\d+)\s*ml\b", r"\1 mi li lít", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*mm\b", r"\1 mi li mét", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*cm\b", r"\1 xen ti mét", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*kg\b", r"\1 ký", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*g\b", r"\1 gam", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*w\b", r"\1 oát", s, flags=re.IGNORECASE)
+
+    # Smooth tech connectors for Vietnamese TTS
+    s = re.sub(r"\bUSB[-\s]*C\b", "USB Type C", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bType[-\s]*C\b", "Type C", s, flags=re.IGNORECASE)
+    return " ".join(s.split())
+
+
 def enforce_short_hook_title(raw_title: str, max_chars: int = 30) -> str:
     """Ensure the opening hook title is strictly within 0..30 characters without cutting mid-word."""
     clean = " ".join((raw_title or "").strip().split())

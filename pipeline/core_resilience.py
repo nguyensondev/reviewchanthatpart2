@@ -38,6 +38,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from pipeline.shared_utils import check_vietnamese_diacritics
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_DIR = PROJECT_ROOT / "output"
@@ -434,9 +436,27 @@ class StorageGarbageCollector:
                 except OSError:
                     pass
 
-        # 5. Purge PUBLISHED videos completely & strip script payloads for RENDERED videos
+        # 5. Purge PUBLISHED videos, strip script payloads for RENDERED videos, AND auto-purge any poisoned unaccented Vietnamese scripts/videos
         freed_published = 0
         vreg_path = self.data_dir / "video_registry.json"
+        m4_out_p = self.data_dir / "m4_production_output.json"
+
+        def _has_unaccented_vi_texts(texts: List[Any]) -> bool:
+            for t in texts:
+                if isinstance(t, str) and t.strip():
+                    ok_d, _, _ = check_vietnamese_diacritics(t)
+                    if not ok_d:
+                        return True
+            return False
+
+        m4_rv_by_id: Dict[str, Dict[str, Any]] = {}
+        if m4_out_p.exists():
+            m4_loaded = safe_load_json(m4_out_p, lambda: {})
+            if isinstance(m4_loaded, dict) and isinstance(m4_loaded.get("rendered_videos"), list):
+                for rv in m4_loaded["rendered_videos"]:
+                    if isinstance(rv, dict) and rv.get("script_id"):
+                        m4_rv_by_id[str(rv["script_id"])] = rv
+
         if vreg_path.exists():
             try:
                 vreg_raw = safe_load_json(vreg_path, lambda: {})
@@ -450,6 +470,42 @@ class StorageGarbageCollector:
                         if not isinstance(val, dict):
                             continue
                         st_val = val.get("status")
+
+                        # Inspect entry + optional script_payload + optional M4 sub_shots for unaccented Vietnamese
+                        sample_texts: List[Any] = [val.get("title_vi"), val.get("hook_title_short_vi")]
+                        sp = val.get("script_payload")
+                        if isinstance(sp, dict):
+                            sample_texts.extend([sp.get("title_vi"), sp.get("hook_title_short_vi")])
+                            for b in sp.get("beats") or []:
+                                if isinstance(b, dict):
+                                    sample_texts.extend([
+                                        b.get("voiceover_vi"),
+                                        b.get("tts_voiceover_vi"),
+                                        b.get("subtitle_text_vi"),
+                                        b.get("on_screen_text_vi"),
+                                    ])
+                        rv_info = m4_rv_by_id.get(str(sid))
+                        if isinstance(rv_info, dict):
+                            sample_texts.extend([rv_info.get("title_vi"), rv_info.get("hook_title_short_vi")])
+                            for ss in rv_info.get("sub_shots") or []:
+                                if isinstance(ss, dict):
+                                    sample_texts.extend([ss.get("tts_text_vi"), ss.get("subtitle_text_vi")])
+
+                        if _has_unaccented_vi_texts(sample_texts):
+                            print(
+                                f"[GC DIACRITIC PURGE] 🧹 Xóa vĩnh viễn kịch bản/video lỗi tiếng Việt không dấu: {sid}",
+                                flush=True,
+                            )
+                            published_ids_to_purge.add(sid)
+                            rendered_ids_to_strip_scripts.add(sid)
+                            mp4_p = MacOSLegacyRuntime.resolve_portable_video_path(val.get("video_path"), sid)
+                            if mp4_p.exists():
+                                freed_published += mp4_p.stat().st_size
+                                mp4_p.unlink(missing_ok=True)
+                            items.pop(sid, None)
+                            vreg_changed = True
+                            continue
+
                         if st_val == "RENDERED":
                             rendered_ids_to_strip_scripts.add(sid)
                             mp4_p = MacOSLegacyRuntime.resolve_portable_video_path(val.get("video_path"), sid)
@@ -475,25 +531,41 @@ class StorageGarbageCollector:
                     if vreg_changed:
                         atomic_write_json(vreg_path, vreg_raw)
 
-                    # Strip rendered/published scripts from m2_script_drafts.json & m3_approved_scripts.json
-                    if rendered_ids_to_strip_scripts:
-                        for fname, list_key in (
-                            ("m2_script_drafts.json", "script_drafts"),
-                            ("m3_approved_scripts.json", "audited_scripts"),
-                        ):
-                            fpath = self.data_dir / fname
-                            if fpath.exists():
-                                fdata = safe_load_json(fpath, lambda: {})
-                                if isinstance(fdata, dict) and isinstance(fdata.get(list_key), list):
-                                    old_len = len(fdata[list_key])
-                                    fdata[list_key] = [
-                                        x for x in fdata[list_key]
-                                        if isinstance(x, dict) and x.get("script_id") not in rendered_ids_to_strip_scripts
-                                    ]
-                                    if len(fdata[list_key]) != old_len:
-                                        atomic_write_json(fpath, fdata)
+                    # Strip rendered/published OR unaccented scripts from m2_script_drafts.json & m3_approved_scripts.json
+                    for fname, list_key in (
+                        ("m2_script_drafts.json", "script_drafts"),
+                        ("m3_approved_scripts.json", "audited_scripts"),
+                    ):
+                        fpath = self.data_dir / fname
+                        if fpath.exists():
+                            fdata = safe_load_json(fpath, lambda: {})
+                            if isinstance(fdata, dict) and isinstance(fdata.get(list_key), list):
+                                old_len = len(fdata[list_key])
+                                kept_list = []
+                                for x in fdata[list_key]:
+                                    if not isinstance(x, dict):
+                                        continue
+                                    x_sid = str(x.get("script_id") or "")
+                                    if x_sid in rendered_ids_to_strip_scripts:
+                                        continue
+                                    x_texts: List[Any] = [x.get("title_vi"), x.get("hook_title_short_vi")]
+                                    for b in x.get("beats") or []:
+                                        if isinstance(b, dict):
+                                            x_texts.extend([
+                                                b.get("voiceover_vi"),
+                                                b.get("tts_voiceover_vi"),
+                                                b.get("subtitle_text_vi"),
+                                                b.get("on_screen_text_vi"),
+                                            ])
+                                    if _has_unaccented_vi_texts(x_texts):
+                                        print(f"[GC DIACRITIC PURGE] 🧹 Xóa bản nháp không dấu `{x_sid}` khỏi {fname}", flush=True)
+                                        continue
+                                    kept_list.append(x)
+                                if len(kept_list) != old_len:
+                                    fdata[list_key] = kept_list
+                                    atomic_write_json(fpath, fdata)
 
-                    # Clean up M4 output & M5 payloads/manifest for purged PUBLISHED videos
+                    # Clean up M4 output & M5 payloads/manifest for purged PUBLISHED or UNACCENTED videos
                     if published_ids_to_purge:
                         payloads_dir = OUTPUT_DIR / "publish_pack" / "m5_payloads"
                         if payloads_dir.exists():
@@ -501,7 +573,6 @@ class StorageGarbageCollector:
                                 for pf in payloads_dir.glob(f"{pid}_*.json"):
                                     freed_published += pf.stat().st_size
                                     pf.unlink(missing_ok=True)
-                        m4_out_p = self.data_dir / "m4_production_output.json"
                         if m4_out_p.exists():
                             m4_d = safe_load_json(m4_out_p, lambda: {})
                             if isinstance(m4_d, dict) and isinstance(m4_d.get("rendered_videos"), list):
