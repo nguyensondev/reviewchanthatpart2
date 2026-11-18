@@ -27,21 +27,20 @@ T = TypeVar("T", bound=BaseModel)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 
-# Verified working Free-Tier model chains (ordered by quality, latency & Vietnamese UTF-8 accuracy)
+# Verified working Full-Flash model chains (100% Full Flash with deep reasoning; Lite/Gemma excluded from M2/M3)
 REASONING_MODEL_CHAIN: List[str] = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemma-4-31b-it",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
 ]
 
 EXTRACTION_MODEL_CHAIN: List[str] = [
-    "gemini-3.5-flash-lite",
     "gemini-3.8-flash",
     "gemini-3.7-flash",
-    "gemini-3.1-flash-lite",
-    "gemma-4-31b-it",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
 ]
 
 MANDATORY_VI_DIACRITIC_RULE = (
@@ -132,7 +131,7 @@ class FreeTierGeminiClient:
     def __init__(
         self,
         min_interval_sec: float = 2.0,
-        timeout_ms: int = 45000,
+        timeout_ms: int = 120000,
         env_path: Path = DEFAULT_ENV_PATH,
     ) -> None:
         self.api_keys = get_api_keys(env_path)
@@ -199,6 +198,8 @@ class FreeTierGeminiClient:
                         temperature=effective_temp,
                         system_instruction=full_sys,
                     )
+                    if "flash" in model_name and "lite" not in model_name:
+                        cfg.thinking_config = types.ThinkingConfig(thinking_budget=1024)
                     effective_prompt = prompt
                     if last_diacritic_err:
                         effective_prompt = (
@@ -232,7 +233,7 @@ class FreeTierGeminiClient:
                     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                         self._rotate_key()
                         time.sleep(3.0)
-                    elif "503" in err_str or "UNAVAILABLE" in err_str:
+                    elif any(code in err_str for code in ("503", "504", "UNAVAILABLE", "DEADLINE_EXCEEDED")):
                         time.sleep(2.0)
                     else:
                         break

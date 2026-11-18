@@ -43,6 +43,8 @@ from pipeline.schemas_m5 import (
 )
 from pipeline.shared_utils import (
     AffiliateCSVRepository,
+    sanitize_youtube_metadata_text,
+    sanitize_youtube_tags,
     strip_accents as _strip_accents,
 )
 from pipeline.sku_registry import SKURegistryManager
@@ -98,6 +100,42 @@ CATEGORY_SHORT_KEYWORDS_VI: Dict[str, Tuple[str, List[str]]] = {
     "glass_mist_oil_sprayer_bottle": (
         "Bình Xịt Dầu Ăn Phun Sương Nồi Chiên",
         ["#BinhXitDauAn", "#NoiChienKhongDau", "#GocNhaBep"],
+    ),
+    "low_profile_wireless_mechanical_keyboard": (
+        "Bàn Phím Cơ Không Dây Gõ Êm",
+        ["#BanPhimCo", "#SetupBanLamViec", "#GocLamViec"],
+    ),
+    "gas_spring_monitor_arm": (
+        "Arm Treo Màn Hình Trợ Lực Khí Nén",
+        ["#ArmManHinh", "#SetupBanLamViec", "#GocLamViec"],
+    ),
+    "magnetic_retractable_fast_charging_cable": (
+        "Cáp Sạc Nhanh Tự Cuộn Chống Rối",
+        ["#CapSacNhanh", "#PhuKienCongNghe", "#GocLamViec"],
+    ),
+    "cordless_compressed_air_desk_duster": (
+        "Máy Hút Thổi Bụi Bàn Phím Cầm Tay",
+        ["#MayHutBuiMini", "#VeSinhBanPhim", "#GocLamViec"],
+    ),
+    "handheld_rechargeable_milk_frother": (
+        "Máy Đánh Bọt Cà Phê Cầm Tay",
+        ["#MayDanhBotCafe", "#PhaCaPheTaiNha", "#GocNhaBep"],
+    ),
+    "temperature_control_gooseneck_kettle": (
+        "Ấm Siêu Tốc Chỉnh Nhiệt Độ Giữ Ấm",
+        ["#AmSieuToc", "#DoGiaDungThongMinh", "#GocNhaBep"],
+    ),
+    "electric_ceramic_burr_coffee_grinder": (
+        "Máy Xay Cà Phê Hạt Mini Dùng Pin",
+        ["#MayXayCaPhe", "#PhaCaPheTaiNha", "#GocNhaBep"],
+    ),
+    "magnetic_rotary_kitchen_timer": (
+        "Đồng Hồ Bấm Giờ Nấu Ăn Nam Châm",
+        ["#DongHoBamGio", "#MeoNhaBep", "#GocNhaBep"],
+    ),
+    "automatic_touchless_dish_soap_dispenser": (
+        "Máy Tạo Bọt Xà Phòng Cảm Ứng Tự Động",
+        ["#MayTaoBotXaPhong", "#DoGiaDungThongMinh", "#GocNhaBep"],
     ),
 }
 
@@ -437,12 +475,12 @@ class PublishPackager:
         Returns `(youtube_shorts_title_vi, facebook_reels_title_vi)`.
         """
         cat_info = CATEGORY_SHORT_KEYWORDS_VI.get(entry.category_id)
-        cat_short_vi = cat_info[0] if cat_info else "Đánh Giá Thực Tế"
+        cat_short_vi = cat_info[0] if cat_info else ""
 
         if entry.script_format == "COMBO_WORKFLOW_SYNERGY" and len(resolved_skus) >= 2:
             s1, s2 = resolved_skus[0], resolved_skus[1]
-            b1 = f"{s1.brand} {s1.model_code}".replace("-Series", "").strip()
-            b2 = f"{s2.brand} {s2.model_code}".replace("Vertical", "").strip()
+            b1 = f"{s1.brand} {s1.model_code.replace('_', ' ')}".replace("-Series", "").strip()
+            b2 = f"{s2.brand} {s2.model_code.replace('_', ' ')}".replace("Vertical", "").strip()
             if entry.domain == "TECH_DESK":
                 base_title = f"Setup Góc Làm Việc Đêm Đỡ Mỏi Mắt & Cổ Tay: {b1} + {b2}"
             else:
@@ -450,20 +488,29 @@ class PublishPackager:
         elif resolved_skus:
             s1 = resolved_skus[0]
             price_k = max(1, s1.estimated_price_vnd // 1000)
-            bm = f"{s1.brand} {s1.model_code}".strip()
+            clean_mc = s1.model_code.replace("_", " ").strip()
+            bm = f"{s1.brand} {clean_mc}".strip()
             if entry.category_id == "digital_kitchen_food_scale":
                 base_title = f"Cân Điện Tử Nhà Bếp Loại Nào Bền? Đánh Giá {bm} (~{price_k}k)"
             elif entry.category_id == "screen_hanging_light_bar":
                 base_title = f"Đèn Treo Màn Hình Chống Chói ~{price_k}k: {bm} Có Đáng Mua?"
             elif entry.category_id == "ergonomic_vertical_mouse":
                 base_title = f"Chuột Công Thái Học Đỡ Mỏi Cổ Tay: {bm} Có Đáng Giá ~{price_k}k?"
+            elif cat_short_vi:
+                base_title = f"{cat_short_vi} ~{price_k}k: {bm} Có Đáng Mua?"
             else:
-                base_title = f"{cat_short_vi} ~{price_k}k: Đánh Giá {bm} Có Đáng Mua?"
+                # Dynamic category fallback: extract short product type from product_name_vi without repeating "Đánh Giá"
+                prod_head = s1.product_name_vi
+                for token_rm in (s1.brand, clean_mc, s1.model_code):
+                    if token_rm:
+                        prod_head = re.sub(re.escape(token_rm), "", prod_head, flags=re.IGNORECASE)
+                prod_head = " ".join(prod_head.split()[:6]).strip(" -–,:") or bm
+                base_title = f"Review {prod_head} ~{price_k}k: {bm} Có Đáng Mua?"
         else:
-            base_title = entry.title_vi.strip()
+            base_title = entry.title_vi.replace("_", " ").strip()
 
-        yt_title = f"{base_title[:76].strip()} #Shorts"
-        fb_title = base_title
+        yt_title = sanitize_youtube_metadata_text(f"{base_title[:76].strip()} #Shorts", max_chars=95)
+        fb_title = base_title.replace("->", "→")
         return yt_title, fb_title
 
     def _build_focused_hashtags(
@@ -591,17 +638,7 @@ class PublishPackager:
         else:
             raw_tags.extend(["đồ gia dụng nhà bếp", "do bep thong minh", "review đồ gia dụng"])
 
-        deduped: List[str] = []
-        total_chars = 0
-        for t in raw_tags:
-            clean_t = re.sub(r"\s+", " ", t).strip()
-            if not clean_t or clean_t in deduped or len(clean_t) > 55:
-                continue
-            if total_chars + len(clean_t) + 2 > 440 or len(deduped) >= 15:
-                break
-            deduped.append(clean_t)
-            total_chars += len(clean_t) + 2
-        return deduped
+        return sanitize_youtube_tags(raw_tags, max_weighted_bytes=350, max_count=15)
 
     def _build_video_package(
         self,
@@ -707,14 +744,17 @@ class PublishPackager:
                     f"   • Link dự phòng toàn bộ gian hàng Shopee Mall ({s_item.brand}): {s_item.mall_search_affiliate_link}"
                 )
 
-        # 1. Pinned Comment (Facebook Reels keeps exact status quo; YouTube Shorts adds Bio Hub click guide)
+        # 1. Pinned Comment (Facebook Reels keeps exact status quo; YouTube Shorts adds Bio Hub click guide WITHOUT '<' or '>')
         varied_intro = HumanBehaviorGuard.pick_varied_pinned_comment_intro(entry.script_id)
         pinned_comment = f"{varied_intro}\n" + "\n".join(pinned_lines)
         yt_bio_guide = (
             "💡 Do YouTube Shorts khóa bấm link trực tiếp ở bình luận, bạn bấm vào tên kênh @shibagamerc "
-            "-> ấn link Bio đầu trang Kênh `go.gocreviewchanthuc.workers.dev` (hoặc copy nhanh link bên dưới) để mở thẳng Shopee Mall nhé:"
+            "→ ấn link Bio đầu trang Kênh go.gocreviewchanthuc.workers.dev (hoặc copy nhanh link bên dưới) để mở thẳng Shopee Mall nhé:"
         )
-        yt_pinned_comment = f"{varied_intro}\n{yt_bio_guide}\n" + "\n".join(pinned_lines)
+        yt_pinned_comment = sanitize_youtube_metadata_text(
+            f"{varied_intro}\n{yt_bio_guide}\n" + "\n".join(pinned_lines),
+            max_chars=2000,
+        )
 
         # 2. Facebook Reels Checklist Caption (High-retention feed format — 100% status quo)
         reels_caption = (
@@ -728,9 +768,9 @@ class PublishPackager:
             + hashtag_line
         )
 
-        # 3. YouTube Shorts 4-Block Semantic SEO Description
+        # 3. YouTube Shorts 4-Block Semantic SEO Description (strictly sanitized against '<' / '>' which cause HTTP 400!)
         search_keywords_footer = ", ".join(yt_tags[:10])
-        yt_description = (
+        raw_yt_description = (
             f"{fb_title} — Đánh giá chi tiết thông số kỹ thuật, ưu điểm và nhược điểm thực tế trước khi mua.\n\n"
             f"{yt_pinned_comment}\n\n"
             + ("🔧 THÔNG SỐ & ĐIỂM NỔI BẬT:\n" + "\n".join(spec_bullets + pros_bullets[:2]) + "\n\n" if (spec_bullets or pros_bullets) else "")
@@ -739,6 +779,7 @@ class PublishPackager:
             + f"🔍 Từ khóa tìm kiếm liên quan: {search_keywords_footer}\n\n"
             + f"{hashtag_line} #Shorts"
         )
+        yt_description = sanitize_youtube_metadata_text(raw_yt_description, max_chars=4800)
 
         hook_short = (entry.hook_title_short_vi or entry.title_vi[:28]).strip()
         vid_path = MacOSLegacyRuntime.resolve_portable_video_path(entry.video_path, entry.script_id)

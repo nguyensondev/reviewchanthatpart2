@@ -43,6 +43,7 @@ from pipeline.core_resilience import (
     safe_load_json,
 )
 from pipeline.schemas_m5 import PublishManifestOutput, PublishVideoPackageItem
+from pipeline.shared_utils import sanitize_youtube_metadata_text, sanitize_youtube_tags
 from pipeline.video_registry import VideoRegistryManager
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -320,17 +321,28 @@ class M5PublisherEngine:
         vpath = MacOSLegacyRuntime.resolve_portable_video_path(pkg.video_path, pkg.script_id)
         mp4_ok = vpath.exists() and vpath.stat().st_size > 100_000
         affiliate_ok = bool(pkg.all_links_ready and pkg.skus and all(s.short_link for s in pkg.skus))
-        yt_title_ok = 20 <= len(pkg.youtube_shorts_title_vi) <= 95 and "#Shorts" in pkg.youtube_shorts_title_vi
+        clean_yt_title = sanitize_youtube_metadata_text(pkg.youtube_shorts_title_vi, max_chars=95)
+        clean_yt_desc = sanitize_youtube_metadata_text(pkg.youtube_shorts_description_vi, max_chars=4800)
+        clean_yt_tags = sanitize_youtube_tags(pkg.youtube_video_tags, max_weighted_bytes=350, max_count=15)
+
+        yt_title_ok = (
+            20 <= len(clean_yt_title) <= 95
+            and "#Shorts" in clean_yt_title
+            and "<" not in clean_yt_title
+            and ">" not in clean_yt_title
+        )
         def _has_valid_aff_domain(txt: str) -> bool:
             return any(d in txt for d in ("s.shopee.vn", "shope.ee", ".workers.dev/", ".pages.dev/", "https://"))
 
         yt_desc_ok = (
-            len(pkg.youtube_shorts_description_vi) >= 180
-            and "0:00" in pkg.youtube_shorts_description_vi
-            and _has_valid_aff_domain(pkg.youtube_shorts_description_vi)
+            len(clean_yt_desc) >= 180
+            and "0:00" in clean_yt_desc
+            and "<" not in clean_yt_desc
+            and ">" not in clean_yt_desc
+            and _has_valid_aff_domain(clean_yt_desc)
         )
-        tags_total_chars = sum(len(t) for t in pkg.youtube_video_tags)
-        yt_tags_ok = 8 <= len(pkg.youtube_video_tags) <= 15 and tags_total_chars <= 460
+        tags_total_chars = sum(len(t) for t in clean_yt_tags)
+        yt_tags_ok = 6 <= len(clean_yt_tags) <= 15 and tags_total_chars <= 400
         fb_caption_ok = (
             "✅" in pkg.facebook_reels_caption_full_vi
             and "⚠️" in pkg.facebook_reels_caption_full_vi
@@ -364,9 +376,9 @@ class M5PublisherEngine:
             },
             "videos_insert_body": {
                 "snippet": {
-                    "title": pkg.youtube_shorts_title_vi,
-                    "description": pkg.youtube_shorts_description_vi,
-                    "tags": pkg.youtube_video_tags,
+                    "title": clean_yt_title,
+                    "description": clean_yt_desc,
+                    "tags": clean_yt_tags,
                     "categoryId": yt_category_id,
                     "defaultLanguage": "vi",
                     "defaultAudioLanguage": "vi",
@@ -428,7 +440,8 @@ class M5PublisherEngine:
         if not (client_id and client_secret and refresh_token):
             raise RuntimeError("Missing YouTube OAuth2 credentials in config/platform_credentials.json")
 
-        with httpx.Client(timeout=60.0) as client:
+        ca_bundle = MacOSLegacyRuntime.resolve_ca_bundle_path()
+        with httpx.Client(timeout=60.0, verify=ca_bundle or True) as client:
             tok_resp = client.post(
                 "https://oauth2.googleapis.com/token",
                 data={
@@ -443,11 +456,15 @@ class M5PublisherEngine:
             headers = {"Authorization": f"Bearer {access_token}"}
 
             yt_cat = "28" if pkg.domain == "TECH_DESK" else "26"
-            meta_body = {
+            safe_title = sanitize_youtube_metadata_text(pkg.youtube_shorts_title_vi, max_chars=95)
+            safe_desc = sanitize_youtube_metadata_text(pkg.youtube_shorts_description_vi, max_chars=4800)
+            safe_tags = sanitize_youtube_tags(pkg.youtube_video_tags, max_weighted_bytes=350, max_count=15)
+
+            meta_body: Dict[str, Any] = {
                 "snippet": {
-                    "title": pkg.youtube_shorts_title_vi,
-                    "description": pkg.youtube_shorts_description_vi,
-                    "tags": pkg.youtube_video_tags,
+                    "title": safe_title,
+                    "description": safe_desc,
+                    "tags": safe_tags,
                     "categoryId": yt_cat,
                     "defaultLanguage": "vi",
                     "defaultAudioLanguage": "vi",
@@ -459,17 +476,29 @@ class M5PublisherEngine:
             }
 
             vpath = MacOSLegacyRuntime.resolve_portable_video_path(pkg.video_path, pkg.script_id)
+            upload_headers = {
+                **headers,
+                "Content-Type": "application/json; charset=UTF-8",
+                "X-Upload-Content-Length": str(vpath.stat().st_size),
+                "X-Upload-Content-Type": "video/mp4",
+            }
             init_resp = client.post(
                 "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-                headers={
-                    **headers,
-                    "Content-Type": "application/json; charset=UTF-8",
-                    "X-Upload-Content-Length": str(vpath.stat().st_size),
-                    "X-Upload-Content-Type": "video/mp4",
-                },
+                headers=upload_headers,
                 json=meta_body,
             )
-            init_resp.raise_for_status()
+            if init_resp.status_code == 400 and "invalidTags" in init_resp.text:
+                # Automatic self-healing retry without tags if YouTube ever rejects a specific tag token
+                meta_body["snippet"].pop("tags", None)
+                init_resp = client.post(
+                    "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+                    headers=upload_headers,
+                    json=meta_body,
+                )
+            if init_resp.status_code >= 400:
+                raise RuntimeError(
+                    f"YouTube HTTP {init_resp.status_code} on videos.insert: {init_resp.text[:320]}"
+                )
             upload_url = init_resp.headers["Location"]
 
             with vpath.open("rb") as vf:
@@ -521,7 +550,8 @@ class M5PublisherEngine:
         vpath = MacOSLegacyRuntime.resolve_portable_video_path(pkg.video_path, pkg.script_id)
         file_size = vpath.stat().st_size
 
-        with httpx.Client(timeout=120.0) as client:
+        ca_bundle = MacOSLegacyRuntime.resolve_ca_bundle_path()
+        with httpx.Client(timeout=120.0, verify=ca_bundle or True) as client:
             start_resp = client.post(
                 f"https://graph.facebook.com/v21.0/{page_id}/video_reels",
                 data={"upload_phase": "start", "access_token": page_token},

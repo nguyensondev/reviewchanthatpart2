@@ -248,6 +248,12 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
     manifest = PublishPackager().build_publish_pack()
     report = M5PublisherEngine().run(live_upload=False)
     assert report.validated_ready_count == len(manifest.packages)
+    for pkg in manifest.packages:
+        assert "<" not in pkg.youtube_shorts_title_vi and ">" not in pkg.youtube_shorts_title_vi
+        assert "<" not in pkg.youtube_shorts_description_vi and ">" not in pkg.youtube_shorts_description_vi, (
+            f"CRITICAL: Forbidden '<' or '>' found in YouTube description of {pkg.script_id} (will cause HTTP 400)!"
+        )
+        assert all("<" not in t and ">" not in t and "_" not in t for t in pkg.youtube_video_tags)
     intros = {
         HumanBehaviorGuard.pick_varied_pinned_comment_intro(f"video_test_{i}")
         for i in range(60)

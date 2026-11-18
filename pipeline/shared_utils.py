@@ -220,6 +220,46 @@ def normalize_vietnamese_for_tts(text: str) -> str:
     return " ".join(s.split())
 
 
+def sanitize_youtube_metadata_text(text: str, max_chars: int = 4800) -> str:
+    """
+    Sanitize `snippet.title` or `snippet.description` for YouTube Data API v3 (`videos.insert`).
+    YouTube strictly rejects `<` and `>` anywhere in title/description with `HTTP 400 Bad Request` (`invalidDescription` / `invalidTitle`).
+    """
+    s = str(text or "")
+    s = s.replace("->", "→").replace("<-", "←").replace("<=", "≤").replace(">=", "≥")
+    s = s.replace("<", "‹").replace(">", "›")
+    s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", s)
+    if len(s) > max_chars:
+        s = s[: max_chars - 1].rsplit(" ", 1)[0].strip()
+    return s.strip()
+
+
+def sanitize_youtube_tags(raw_tags: List[str], max_weighted_bytes: int = 350, max_count: int = 15) -> List[str]:
+    """
+    Sanitize `snippet.tags` for YouTube Data API v3 (`videos.insert`) so it never triggers `HTTP 400 invalidTags`:
+      - Removes forbidden `<`, `>`, `,`, `"`, `#`, and replaces `_` with space (`A3_Lite` -> `a3 lite`).
+      - Accounts for YouTube's internal `+3` quote/comma overhead on multi-word UTF-8 tags (`<= 350` bytes vs 500 limit).
+    """
+    cleaned_list: List[str] = []
+    used_budget = 0
+    for t in raw_tags or []:
+        c = str(t or "").replace("_", " ")
+        c = re.sub(r"[<>,\"#`]", " ", c)
+        c = re.sub(r"[\x00-\x1f\x7f]", "", c)
+        c = " ".join(c.split()).strip()
+        if len(c) < 2 or len(c) > 45:
+            continue
+        if c.lower() in {x.lower() for x in cleaned_list}:
+            continue
+        # YouTube counts UTF-8 length + quotes for multi-word tags + comma separator
+        tag_cost = len(c.encode("utf-8")) + (3 if " " in c else 1)
+        if used_budget + tag_cost > max_weighted_bytes or len(cleaned_list) >= max_count:
+            break
+        cleaned_list.append(c)
+        used_budget += tag_cost
+    return cleaned_list
+
+
 def enforce_short_hook_title(raw_title: str, max_chars: int = 30) -> str:
     """Ensure the opening hook title is strictly within 0..30 characters without cutting mid-word."""
     clean = " ".join((raw_title or "").strip().split())
