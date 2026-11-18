@@ -63,7 +63,7 @@ _KNOWN_ASCII_TECH_BRAND_TOKENS: set[str] = {
     "combo", "solo", "review", "reviewer", "unbox", "test", "video", "clip", "shorts",
     "reels", "tiktok", "youtube", "facebook", "shopee", "mall", "shop", "link", "bio",
     "ok", "model", "size", "mini", "pro", "max", "plus", "ultra", "air", "auto", "smart",
-    "touch", "sensor", "timer", "mode", "app", "full", "hd", "uhd", "fps", "hz", "cri", "ra",
+    "touch", "sensor", "timer", "mode", "app", "full", "hd", "uhd", "fps", "hz", "cri", "ra", "format",
 }
 
 
@@ -84,8 +84,10 @@ def check_vietnamese_diacritics(
     if not raw:
         return True, 1.0, ""
 
+    # Strip SNAKE_CASE enum identifiers (e.g. SPEC_TRAP_AND_HIDDEN_COST, SINGLE_SKU_DEEP_DIVE)
+    cleaned = re.sub(r"\b[A-Z0-9]+(?:_[A-Z0-9]+)+\b", " ", raw)
     # Strip currency 'đ' attached to numbers (e.g., 420.000đ, 89k, 1,85tr) so 'đ' in prices never fakes accents
-    cleaned = re.sub(r"\b\d[\d.,]*\s*(?:đ|vnd|vnđ|k|tr|ml|mm|cm|g|kg|w|v|mah|dpi|hz)\b", " ", raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b\d[\d.,]*\s*(?:đ|vnd|vnđ|k|tr|ml|mm|cm|g|kg|w|v|mah|dpi|hz)\b", " ", cleaned, flags=re.IGNORECASE)
     # Extract pure alphabetic tokens (length >= 2, no digits)
     raw_tokens = re.findall(r"[^\W\d_]{2,}", cleaned, flags=re.UNICODE)
 

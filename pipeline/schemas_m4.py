@@ -53,6 +53,7 @@ class RenderedVideoItem(BaseModel):
         description="Trạng thái sản xuất tại M4: luôn là RENDERED (đã xuất file MP4, chưa đăng)",
     )
     layout_mode: Literal["B1", "cinema", "fullscreen"] = "B1"
+    end_card_type: Literal["SCORE_VERDICT_CARD", "VERSUS_2COL_CARD", "BUY_SKIP_CARD"] = "SCORE_VERDICT_CARD"
     width: int = 1080
     height: int = 1920
     fps: int = 30

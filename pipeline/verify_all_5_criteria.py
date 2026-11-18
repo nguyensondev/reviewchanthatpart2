@@ -280,7 +280,7 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
         script_format="SINGLE_SKU_DEEP_DIVE",
         domain="TECH_DESK",
         category_id="ergonomic_vertical_mouse",
-        narrative_angle="PAIN_POINT_REALITY_CHECK",
+        narrative_angle="REVERSE_CAVEAT_FIRST",
         title_vi="Review chuot cong thai hoc Logitech Lift Vertical",
         hook_title_short_vi="Het moi co tay ngay",
         selection_rationale_vi="Phan tich chuot doc chong moi co tay",
@@ -348,6 +348,40 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
     assert "1 triệu 850 nghìn đồng" in tts_spoken and "57 độ" in tts_spoken and "0 phẩy 1 gam" in tts_spoken
     print(
         "  [PASS] Cổng chặn Tiếng Việt Không Dấu 5 tầng (LLM Client + M2 + M3 Hard Gate + M4 Pre-TTS + Chuẩn hóa đọc số TTS): OK.",
+        flush=True,
+    )
+
+    # 5. Upgrade-1 Verification: Smart 6-Format Rotation + 3 M4 PIL Visual End-Cards
+    from pipeline.m2_script_gen import UPGRADE_1_ANGLE_POOL, recommend_angles_for_category
+    from pipeline.m4_video_producer import (
+        _render_pil_buy_skip_card,
+        _render_pil_score_verdict_card,
+        _render_pil_versus_2col_card,
+        _select_end_card_type,
+    )
+
+    assert len(UPGRADE_1_ANGLE_POOL) == 6
+    assert recommend_angles_for_category("gan_desktop_fast_charger_station", "TECH_DESK")[0] == "SPEC_TRAP_AND_HIDDEN_COST"
+    assert recommend_angles_for_category("screen_hanging_light_bar", "TECH_DESK")[0] == "HYPE_VS_REALITY_TEST"
+    assert recommend_angles_for_category("handheld_rechargeable_milk_frother", "KITCHEN_TECH")[0] == "ANTI_DUST_DRAWER_TEST"
+    assert recommend_angles_for_category("ergonomic_vertical_mouse", "TECH_DESK")[0] == "HABIT_DIAGNOSIS_STORY"
+
+    assert _select_end_card_type("REVERSE_CAVEAT_FIRST", "s1") == "BUY_SKIP_CARD"
+    assert _select_end_card_type("SPEC_TRAP_AND_HIDDEN_COST", "s2") == "VERSUS_2COL_CARD"
+    assert _select_end_card_type("HYPE_VS_REALITY_TEST", "s3") == "SCORE_VERDICT_CARD"
+
+    with tempfile.TemporaryDirectory() as card_td:
+        c1 = Path(card_td) / "c1.png"
+        c2 = Path(card_td) / "c2.png"
+        c3 = Path(card_td) / "c3.png"
+        _render_pil_score_verdict_card(c1, 8.8, "Baseus i-wok2", "Ánh sáng bất đối xứng chống chói thật", "~420k")
+        _render_pil_versus_2col_card(c2, "~110k", "Baseus i-wok2", "~420k", "Thân hợp kim nhôm bền bỉ")
+        _render_pil_buy_skip_card(c3, "~1.850k", "Ngồi máy tính 8 tiếng cần đỡ mỏi cổ tay", "Bàn tay quá cỡ lớn hơn trung bình")
+        assert c1.exists() and c1.stat().st_size > 8000
+        assert c2.exists() and c2.stat().st_size > 8000
+        assert c3.exists() and c3.stat().st_size > 8000
+    print(
+        "  [PASS] Upgrade-1 (6 Format kể chuyện khớp ngữ cảnh + 3 Thẻ Visual M4 Chấm điểm / Đối đầu / Nên mua-Cân nhắc): OK.",
         flush=True,
     )
 

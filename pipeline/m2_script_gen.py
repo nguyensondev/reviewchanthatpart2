@@ -86,6 +86,73 @@ def _slugify(text: str) -> str:
     return s or "script"
 
 
+UPGRADE_1_ANGLE_POOL: List[NarrativeAngle] = [
+    "REVERSE_CAVEAT_FIRST",
+    "HYPE_VS_REALITY_TEST",
+    "SPEC_TRAP_AND_HIDDEN_COST",
+    "ANTI_DUST_DRAWER_TEST",
+    "HABIT_DIAGNOSIS_STORY",
+    "FAST_25S_MICRO_LOOP",
+]
+
+
+def recommend_angles_for_category(
+    category_id: str,
+    domain: str,
+    is_combo: bool = False,
+) -> List[NarrativeAngle]:
+    """
+    Smart Context-Matched Angle Recommender (Upgrade 1):
+    Maps each product category to the storytelling formats that fit its real physical/usage nature
+    so M2 never applies an awkward or hallucinated angle.
+    """
+    cid = (category_id or "").lower()
+    if is_combo:
+        return [
+            "HABIT_DIAGNOSIS_STORY",
+            "HYPE_VS_REALITY_TEST",
+            "REVERSE_CAVEAT_FIRST",
+            "SPEC_TRAP_AND_HIDDEN_COST",
+        ]
+    # 1. Power, hubs, cables, chargers, vacuum sealers, precision scales -> Spec traps & hidden cost shine!
+    if any(k in cid for k in ("charger", "gan", "hub", "cable", "vacuum", "scale", "power")):
+        return [
+            "SPEC_TRAP_AND_HIDDEN_COST",
+            "REVERSE_CAVEAT_FIRST",
+            "FAST_25S_MICRO_LOOP",
+            "ANTI_DUST_DRAWER_TEST",
+            "HYPE_VS_REALITY_TEST",
+        ]
+    # 2. Viral desk/kitchen aesthetic gear -> "Thực chiến hay làm màu?" & Habit diagnosis shine!
+    if any(k in cid for k in ("light", "arm", "sprayer", "soap", "dispenser")):
+        return [
+            "HYPE_VS_REALITY_TEST",
+            "HABIT_DIAGNOSIS_STORY",
+            "REVERSE_CAVEAT_FIRST",
+            "FAST_25S_MICRO_LOOP",
+            "SPEC_TRAP_AND_HIDDEN_COST",
+        ]
+    # 3. Handheld prep & cleaning tools -> "Bài test vứt xó / vệ sinh 10 giây" shines!
+    if any(k in cid for k in ("frother", "grinder", "thermometer", "duster", "timer", "chopper")):
+        return [
+            "ANTI_DUST_DRAWER_TEST",
+            "FAST_25S_MICRO_LOOP",
+            "REVERSE_CAVEAT_FIRST",
+            "SPEC_TRAP_AND_HIDDEN_COST",
+            "HYPE_VS_REALITY_TEST",
+        ]
+    # 4. Ergonomic daily-driver gear & temperature kettles -> Habit diagnosis & Reverse caveat shine!
+    if any(k in cid for k in ("mouse", "stand", "keyboard", "kettle")) or domain == "TECH_DESK":
+        return [
+            "HABIT_DIAGNOSIS_STORY",
+            "REVERSE_CAVEAT_FIRST",
+            "HYPE_VS_REALITY_TEST",
+            "SPEC_TRAP_AND_HIDDEN_COST",
+            "FAST_25S_MICRO_LOOP",
+        ]
+    return list(UPGRADE_1_ANGLE_POOL)
+
+
 class M2ScriptGeneratorEngine:
     """Executes M2 Synergy Classification, Timed Script Generation, and Ground-Truth Binding."""
 
@@ -104,6 +171,8 @@ class M2ScriptGeneratorEngine:
     ) -> str:
         brand_gate = OfficialBrandVideoGate()
         category_blocks: List[str] = []
+        assigned_batch_angles: List[NarrativeAngle] = []
+        fast_micro_used = False
         for idx, cat in enumerate(m1_data.qualified_categories, start=1):
             w = cat.primary_winner
             ru = cat.runner_up
@@ -112,10 +181,27 @@ class M2ScriptGeneratorEngine:
             clean_footage_sec = brand_gate.estimate_sku_clean_footage_sec(
                 w.brand, w.model_code, w.candidate_id, w.youtube_evidence
             )
-            if clean_footage_sec < 38.0:
+            rec_angles = recommend_angles_for_category(cat.category_id, cat.domain, is_combo=False)
+            # Deterministic day/category rotation across suitable angles while ensuring batch uniqueness
+            rot_seed = sum(ord(ch) for ch in f"{m1_data.m1_run_id}::{cat.category_id}")
+            rotated = [rec_angles[(rot_seed + i) % len(rec_angles)] for i in range(len(rec_angles))]
+            chosen_angle: NarrativeAngle = rotated[0]
+            for cand_ang in rotated + UPGRADE_1_ANGLE_POOL:
+                if cand_ang == "FAST_25S_MICRO_LOOP" and (fast_micro_used or clean_footage_sec >= 50.0 and idx == 1):
+                    continue
+                if cand_ang not in assigned_batch_angles:
+                    chosen_angle = cand_ang
+                    break
+            if chosen_angle == "FAST_25S_MICRO_LOOP":
+                fast_micro_used = True
+            assigned_batch_angles.append(chosen_angle)
+
+            if chosen_angle == "FAST_25S_MICRO_LOOP":
+                word_budget_str = "85 – 108 từ (mỗi beat 17 – 22 từ, nhịp siêu tốc dồn dập ~24s – 27s giúp kéo tỷ lệ xem lặp >100%)"
+            elif clean_footage_sec < 38.0:
                 word_budget_str = "125 – 145 từ (mỗi beat 24 – 30 từ, tương ứng ~33s – 38s để vừa khít thời lượng video gốc chính hãng mà KHÔNG BAO GIỜ phải lặp cảnh)"
             else:
-                word_budget_str = "155 – 185 từ (mỗi beat 30 – 38 từ, tương ứng ~41s – 48s)"
+                word_budget_str = "150 – 180 từ (mỗi beat 29 – 36 từ, tương ứng ~40s – 47s)"
 
             runner_line = (
                 f"  - Mẫu so sánh trực tiếp (`{ru.candidate_id}`): {ru.brand} ({ru.model_code or 'N/A'}) — {ru.product_name_vi} | "
@@ -135,6 +221,7 @@ class M2ScriptGeneratorEngine:
                 f"""
 === NHÓM CÔNG NĂNG {idx}: `{cat.category_id}` — {cat.category_name_vi} ===
 - Chủ đề gốc (Domain): `{cat.domain}`
+- FORMAT KỂ CHUYỆN KHỚP NGỮ CẢNH BẮT BUỘC CHO KỊCH BẢN SOLO NÀY (`narrative_angle`): **`{chosen_angle}`** (Các phương án dự phòng hợp sản phẩm: `{rec_angles[:3]}`)
 - Vấn đề giải quyết: {cat.problem_solved_vi}
 - SẢN PHẨM CHÍNH (`{w.candidate_id}`): {w.brand} | Model: {w.model_code or 'N/A'} | Tên: {w.product_name_vi}
   + Giá thị trường chuẩn: {w.estimated_market_price_vnd:,}đ ({w.price_vs_median_ratio}x trung vị) | Điểm M1: {w.score_breakdown.total_score_100}/100
@@ -220,29 +307,28 @@ YÊU CẦU TẠO KỊCH BẢN (`LLMM2BatchGenerationResponse`):
 {multi_rule}
 - MỌI KỊCH BẢN BẮT BUỘC ĐIỀN `hook_title_short_vi` (tiêu đề mở bài hiển thị 2s đầu video, NGẮN GỌN TỐI ĐA 30 KÝ TỰ, có dấu tiếng Việt chuẩn, không dài dòng che nội dung).
 
-PHÂN BỔ GÓC KỂ CHUYỆN KHÁC BIỆT (`narrative_angle`) & CHỦ ĐỀ (`domain`, `category_id`):
-Mỗi kịch bản trong `scripts` BẮT BUỘC phải điền đúng `domain` (`TECH_DESK` hoặc `KITCHEN_TECH`), đúng `category_id` của sản phẩm tương ứng, và PHẢI gán MỘT `narrative_angle` KHÁC NHAU (KHÔNG ĐƯỢC HAI KỊCH BẢN TRÙNG `narrative_angle`):
-1. `PAIN_POINT_REALITY_CHECK` (Trải nghiệm thực tế giải quyết nỗi đau đời thường)
-2. `MYTH_VS_FACT_TEARDOWN` (Phá bỏ lầm tưởng phổ biến bằng trải nghiệm thật)
-3. `TIME_AND_EFFORT_MATH` (Giá trị sử dụng thực tế mỗi ngày so với chi phí)
-4. `DECISION_GUIDE_BY_USER_TYPE` (Ai thực sự cần món này và ai không nên mua)
-5. `WORKFLOW_UPGRADE_JOURNEY` (Nâng cấp trải nghiệm góc làm việc / căn bếp liền mạch)
+KHO 6 FORMAT KỂ CHUYỆN MỚI LẠ KHỚP NGỮ CẢNH (`narrative_angle` — UPGRADE 1):
+Mỗi kịch bản trong `scripts` BẮT BUỘC phải điền đúng `domain`, đúng `category_id`, và dùng đúng `narrative_angle` đã được ghép thông minh cho nhóm đó (TUYỆT ĐỐI KHÔNG HAI KỊCH BẢN NÀO TRONG ĐỢT TRÙNG `narrative_angle`):
+1. `REVERSE_CAVEAT_FIRST` (**Bóc Điểm Trừ Ngay 3 Giây Đầu**): Mở màn Beat 1 bằng lời can ngăn thẳng thắn về giới hạn thật của sản phẩm (*"Khoan xuống tiền mua chiếc ... này nếu bạn..."*) kèm cảnh báo bẫy hàng rẻ -> Beat 2 & 3 lật ngược thế cờ chứng minh vì sao với đúng tệp người dùng thì nó lại cực kỳ đáng giá -> Beat 4 phân tích kỹ cách dùng khắc phục giới hạn đó -> Beat 5 chốt nhanh ai hợp/ai bỏ qua.
+2. `HYPE_VS_REALITY_TEST` (**Thực Chiến Hay Chỉ Làm Màu?**): Mở màn Beat 1 đặt thẳng câu hỏi hoài nghi của đám đông (*"Món ... này thực sự hiệu quả hay chỉ mua về decor làm màu tốn tiền?"*) + so với hàng chợ làm màu -> Beat 2 & 3 giải mã bằng cơ chế vật lý/quang học/thiết kế cốt lõi -> Beat 4 nêu thẳng 1 điểm trừ thực tế -> Beat 5 chấm mức độ thực dụng & mức giá.
+3. `SPEC_TRAP_AND_HIDDEN_COST` (**Thợ Soi Thông Số Ảo & Cái Giá Ngầm**): Mở màn Beat 1 vạch trần chiêu nổ thông số ảo hoặc cái giá ngầm khi ham hàng trôi nổi giá rẻ (dựa đúng dữ liệu `rejected_foils` của M1, không bịa chuyện vô lý) -> Beat 2 & 3 đối chứng thông số chuẩn xác và độ hoàn thiện của hàng chính hãng -> Beat 4 nêu rõ giới hạn thực tế -> Beat 5 chốt bài toán đáng tiền.
+4. `ANTI_DUST_DRAWER_TEST` (**Bài Kiểm Tra Vứt Xó & Độ Lười Đời Thường**): Mở màn Beat 1 chạm trúng tâm lý *"mua về 3 bữa vứt xó đóng bụi vì lích kích/lười vệ sinh"* (như mấy mẫu rẻ khó dùng) -> Beat 2 & 3 chứng minh thao tác gọn lẹ, dễ lau rửa/sử dụng hàng ngày của sản phẩm chính -> Beat 4 nói thẳng điểm trừ thật -> Beat 5 chốt đối tượng dùng mỗi ngày.
+5. `HABIT_DIAGNOSIS_STORY` (**Bắt Bệnh Thói Quen Đời Thường**): Mở màn Beat 1 đọc vị trúng phóc triệu chứng quen thuộc (4h chiều mỏi cổ tay, 11h đêm nhức mắt, căn bếp vướng víu...) -> Beat 2 & 3 dẫn mượt sang cơ chế giải quyết triệt để của sản phẩm chính so với đồ rẻ -> Beat 4 lưu ý thẳng nhược điểm thực tế -> Beat 5 chốt giá & nơi xem hàng chuẩn hãng.
+6. `FAST_25S_MICRO_LOOP` (**Siêu Tốc 24–27 Giây Kéo Loop & Tương Tác**): Tổng độ dài **85 – 108 từ (mỗi beat 17 – 22 từ)**, nhịp dồn dập gãy gọn không rườm rà: Beat 1 vào thẳng vấn đề + bẫy đồ rẻ; Beat 2 & 3 chốt 2–3 điểm sáng ăn tiền nhất; Beat 4 chốt 1 điểm trừ thật trong 1 câu gọn; Beat 5 báo giá + đặt 1 câu hỏi chia 2 thói quen người dùng để kích thích bình luận + chỉ chỗ xem chính hãng.
 
 NGUYÊN TẮC VÀNG: VĂN NÓI ĐỜI THƯỜNG CỦA NGƯỜI THẬT — CẤM TUYỆT ĐỐI VĂN MẪU AI / BROCHURE:
 1. **CẤM TUYỆT ĐỐI các cụm từ sáo rỗng mang mùi AI hoặc thuật ngữ nội bộ**:
    - CẤM viết trong lời thoại: *"mẫu Quán quân"*, *"mẫu Á quân"*, *"mẫu đối chứng"*, *"Sản phẩm hoàn thiện chắc chắn từ..."*, *"Giải pháp chuẩn chỉnh nhất chính là..."*, *"Hãy đầu tư nghiêm túc vào..."*, *"Mã này trang bị..."*, *"sở hữu tính năng"*, *"mang lại trải nghiệm tuyệt vời"*, *"Tổng kết lại, với khoảng..."*.
-   - Hãy viết đúng như một người bạn / reviewer có nghề đang trò chuyện trực tiếp, tự nhiên, gần gũi (VD: *"Cầm chiếc ... này trên tay mới hiểu vì sao..."*, *"Điểm mình ưng nhất ở thiết kế này là..."*, *"Thử đặt cạnh mấy dòng ... rẻ tiền mới thấy khác hẳn..."*, *"Có một điểm thực tế mình phải dặn trước..."*, *"Tính ra ở tầm giá khoảng ... thì..."*).
-2. **MỞ BÀI (Beat 1) CUỐN HÚT, ĐA DẠNG & KHỚP HÌNH ẢNH TRÊN MÀN HÌNH**:
-   - Các kịch bản trong cùng đợt chạy phải có cách vào đề hoàn toàn khác nhau: có thể mở bằng một cảnh sinh hoạt rất đời (ngồi gõ phím 11 giờ đêm tắt đèn phòng, mỏi nhừ cổ tay sau ngày dài làm việc, hay làm bánh đong lệch vài gram bột), hoặc một trải nghiệm đối chứng thực tế.
-   - Không mở bài kiểu công thức cứng nhắc lặp đi lặp lại. Trong Beat 1, lồng ghép tự nhiên bẫy hàng rẻ/OEM (`rejected_foils`) và dẫn thẳng vào nhân vật chính để hình ảnh sản phẩm trên màn hình khớp nhịp với lời kể.
-3. **ĐỘ DÀI TỰ NHIÊN THEO ĐÚNG `NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU` CỦA TỪNG SKU**:
-   - Tuân thủ sát `NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU` đã tính sẵn ở từng nhóm công năng bên trên (`125 – 145 từ` với SKU có 1 video ngắn ~35s; `155 – 185 từ` với SKU hoặc Combo có nhiều video ~45-50s) để **video tuyệt đối không bao giờ phải lặp cảnh chỉ vì cố kéo theo kịch bản dài**, đồng thời vẫn đủ chiều sâu làm bật trọn vẹn các điểm sáng của sản phẩm.
-4. **CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1..5`) MƯỢT MÀ & KHỚP CẢNH QUAY (`visual_instruction_vi`)**:
-   - Beat 1 (`HOOK_FOIL_WARNING`): Mở đầu tự nhiên, chạm đúng tình huống đời thực + lướt nhanh điểm yếu của hàng OEM giá rẻ (nêu đúng mức giá từ M1) để dẫn vào sản phẩm chính.
-   - Beat 2 (`WINNER_REVEAL_SPECS` / `COMBO_STEP_1`): Lời dẫn tự nhiên giới thiệu thương hiệu + `model_code` + phân tích thiết kế/chất liệu/cấu tạo cốt lõi giúp ích gì ngoài đời thực (khớp cảnh quay cận cảnh thiết kế/vật liệu).
-   - Beat 3 (`HEAD_TO_HEAD_PROOF` / `COMBO_STEP_2_TRANSITION`): Đào sâu trải nghiệm sử dụng thực tế các điểm sáng đắt giá nhất (`highlight_pros_vi`) và sự vượt trội so với dòng phổ thông (khớp cảnh quay thao tác sử dụng thực tế).
-   - Beat 4 (`HONEST_CAVEAT`): Chuyển ý thẳng thắn, nói rõ nhược điểm thực tế từ `honest_caveat_vi` dưới góc nhìn công bằng (ai sẽ thấy bất tiện, ai dùng vẫn rất ổn — khớp cảnh quay chi tiết bộ phận liên quan).
-   - Beat 5 (`VALUE_VERDICT_CTA`): Chốt tự nhiên xem món này hợp với ai ở mức giá ~`estimated_market_price_vnd` và nhắn nhẹ người xem tham khảo link chính hãng ở giỏ hàng/bình luận.
+   - Hãy viết đúng như một người bạn / reviewer có nghề đang trò chuyện trực tiếp, tự nhiên, gần gũi và **thể hiện rõ cá tính của `narrative_angle` được giao** ngay từ câu đầu tiên của Beat 1!
+2. **ĐỘ DÀI TỰ NHIÊN THEO ĐÚNG `NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU` CỦA TỪNG SKU / FORMAT**:
+   - Nếu `narrative_angle == "FAST_25S_MICRO_LOOP"`: viết gọn ghẽ **85 – 108 từ** (17 – 22 từ/beat, trọn câu không cụt ý).
+   - Các format còn lại: bám sát ngân sách từ (`125 – 145 từ` hoặc `150 – 180 từ`) đã tính sẵn ở từng nhóm công năng bên trên.
+3. **CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1..5`) MƯỢT MÀ & KHỚP CẢNH QUAY (`visual_instruction_vi`)**:
+   - Beat 1 (`HOOK_FOIL_WARNING`): Mở màn sắc bén theo đúng tinh thần của `narrative_angle` được giao + đối chiếu tự nhiên với điểm yếu hàng rẻ (`rejected_foils`, đúng giá từ M1).
+   - Beat 2 (`WINNER_REVEAL_SPECS` / `COMBO_STEP_1`): Lời dẫn tự nhiên giới thiệu thương hiệu + `model_code` + cơ chế/vật liệu/thông số cốt lõi giải quyết vấn đề ngoài đời thực.
+   - Beat 3 (`HEAD_TO_HEAD_PROOF` / `COMBO_STEP_2_TRANSITION`): Đào sâu trải nghiệm thực tế các điểm sáng đắt giá nhất (`highlight_pros_vi`) vượt trội so với dòng phổ thông.
+   - Beat 4 (`HONEST_CAVEAT`): Nói rõ nhược điểm thực tế từ `honest_caveat_vi` dưới góc nhìn công bằng (ai thấy bất tiện, ai dùng vẫn rất ổn).
+   - Beat 5 (`VALUE_VERDICT_CTA`): Chốt nhanh ai nên mua ở mức giá ~`estimated_market_price_vnd` (kèm câu hỏi ngắn gợi bình luận tự nhiên nếu hợp mạch) và nhắn nhẹ tham khảo gian hàng chính hãng ở phần bình luận/bio.
 
 RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI (ZERO TOLERANCE):
 - NGÔN NGỮ VOICEOVER, PHỤ ĐỀ & TIÊU ĐỀ: BẮT BUỘC 100% viết bằng **tiếng Việt CÓ DẤU ĐẦY ĐỦ (UTF-8 chuẩn)**, đúng chính tả, câu văn hoàn chỉnh không cụt ý. TUYỆT ĐỐI CẤM viết tiếng Việt không dấu (ASCII) ở bất kỳ từ hay câu nào — chỉ cần 1 cụm từ mất dấu là toàn bộ kịch bản bị hủy bỏ vì làm hỏng AI TTS!
@@ -347,10 +433,14 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI (ZERO TOLERANCE):
         cursor_sec = 0.0
         total_words = 0
 
+        is_fast_micro = raw_script.narrative_angle == "FAST_25S_MICRO_LOOP"
+        beat_word_cap = 24 if is_fast_micro else 42
+        min_beat_dur = 4.2 if is_fast_micro else MIN_BEAT_DURATION_SEC
+
         for pos, b in enumerate(sorted_beats, start=1):
-            vo = _cap_beat_voiceover(b.voiceover_vi, max_words=42)
+            vo = _cap_beat_voiceover(b.voiceover_vi, max_words=beat_word_cap)
             wc = len(vo.split()) if vo else 0
-            dur = round(min(13.5, max(MIN_BEAT_DURATION_SEC, wc / DEFAULT_SPEAKING_RATE_WPS)), 1)
+            dur = round(min(13.5, max(min_beat_dur, wc / DEFAULT_SPEAKING_RATE_WPS)), 1)
             start_s = round(cursor_sec, 1)
             end_s = round(start_s + dur, 1)
             cursor_sec = end_s
@@ -506,7 +596,7 @@ NHIỆM VỤ CỦA BẠN:
 2. KHẮC PHỤC TRIỆT ĐỂ 100% các lỗi và góp ý trong `rewrite_instructions_for_m2_vi` của M3:
    - Mở bài (Beat 1) phải có Hook giàu hình ảnh thực tế, chạm đúng nỗi đau người dùng.
    - Đầu các Beat 2, 3, 4, 5 BẮT BUỘC có lời dẫn chuyển ý mượt mà, tự nhiên.
-   - BẮT BUỘC nêu bật đầy đủ các điểm sáng (`Ưu điểm nổi bật` & `Thông số chuẩn` từ M1), biến thông số thành lợi ích trải nghiệm thật, độ dài đủ sâu **145 – 195 từ** (trung bình **29 – 39 từ/beat**, trọn vẹn câu chữ).
+   - BẮT BUỘC nêu bật đầy đủ các điểm sáng (`Ưu điểm nổi bật` & `Thông số chuẩn` từ M1), biến thông số thành lợi ích trải nghiệm thật, độ dài đúng chuẩn format (`85 – 110 từ` nếu `narrative_angle == 'FAST_25S_MICRO_LOOP'`; `135 – 185 từ` cho các format còn lại, trọn vẹn câu chữ).
    - Beat 4 (`HONEST_CAVEAT`) nói thẳng nhược điểm thực tế từ M1 nhưng đặt trong ngữ cảnh công bằng, khách quan.
 
 {chr(10).join(critique_blocks)}
@@ -648,7 +738,8 @@ NHIỆM VỤ CỦA BẠN:
                     raw_s.script_format = old_draft.script_format
                     raw_s.domain = old_draft.domain
                     raw_s.category_id = old_draft.category_id
-                    raw_s.narrative_angle = old_draft.narrative_angle
+                    if old_draft.narrative_angle in UPGRADE_1_ANGLE_POOL:
+                        raw_s.narrative_angle = old_draft.narrative_angle  # type: ignore[assignment]
                     raw_s.primary_sku_ids = list(old_draft.primary_sku_ids)
                 new_draft = self._postprocess_script(
                     idx=orig_idx,
@@ -692,20 +783,6 @@ NHIỆM VỤ CỦA BẠN:
 
         processed_scripts: List[ScriptDraftItem] = []
         used_angles: set[str] = set()
-        solo_angle_pool: List[NarrativeAngle] = [
-            "PAIN_POINT_REALITY_CHECK",
-            "MYTH_VS_FACT_TEARDOWN",
-            "TIME_AND_EFFORT_MATH",
-            "DECISION_GUIDE_BY_USER_TYPE",
-            "WORKFLOW_UPGRADE_JOURNEY",
-        ]
-        multi_angle_pool: List[NarrativeAngle] = [
-            "DECISION_GUIDE_BY_USER_TYPE",
-            "WORKFLOW_UPGRADE_JOURNEY",
-            "TIME_AND_EFFORT_MATH",
-            "MYTH_VS_FACT_TEARDOWN",
-            "PAIN_POINT_REALITY_CHECK",
-        ]
 
         for idx, raw_s in enumerate(llm_resp.scripts, start=1):
             draft = self._postprocess_script(
@@ -716,9 +793,17 @@ NHIỆM VỤ CỦA BẠN:
                 valid_runner_ids=valid_runner_ids,
                 valid_foil_ids=valid_foil_ids,
             )
-            if draft.narrative_angle in used_angles:
-                pool = multi_angle_pool if draft.script_format != "SINGLE_SKU_DEEP_DIVE" else solo_angle_pool
-                for candidate_angle in pool:
+            if draft.narrative_angle in used_angles or (
+                draft.narrative_angle == "FAST_25S_MICRO_LOOP" and draft.total_word_count > 125
+            ):
+                pool = recommend_angles_for_category(
+                    draft.category_id,
+                    draft.domain,
+                    is_combo=(draft.script_format != "SINGLE_SKU_DEEP_DIVE"),
+                )
+                for candidate_angle in pool + UPGRADE_1_ANGLE_POOL:
+                    if candidate_angle == "FAST_25S_MICRO_LOOP" and draft.total_word_count > 125:
+                        continue
                     if candidate_angle not in used_angles:
                         draft.narrative_angle = candidate_angle
                         break

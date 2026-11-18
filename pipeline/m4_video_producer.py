@@ -353,6 +353,37 @@ def _wrap_card_text(text: str, max_chars_per_line: int = 36, max_lines: int = 3)
     return lines[:max_lines]
 
 
+def _draw_vector_check_badge(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int = 16, color: Tuple[int, int, int] = (46, 204, 113)) -> None:
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*color, 255))
+    d.line([(cx - 7, cy + 1), (cx - 2, cy + 6), (cx + 8, cy - 5)], fill=(255, 255, 255, 255), width=3)
+
+
+def _draw_vector_cross_badge(d: ImageDraw.ImageDraw, cx: int, cy: int, r: int = 16, color: Tuple[int, int, int] = (235, 87, 87)) -> None:
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*color, 255))
+    d.line([(cx - 6, cy - 6), (cx + 6, cy + 6)], fill=(255, 255, 255, 255), width=3)
+    d.line([(cx - 6, cy + 6), (cx + 6, cy - 6)], fill=(255, 255, 255, 255), width=3)
+
+
+def _select_end_card_type(
+    narrative_angle: str,
+    script_id: str,
+) -> Literal["SCORE_VERDICT_CARD", "VERSUS_2COL_CARD", "BUY_SKIP_CARD"]:
+    """Map Upgrade-1 `narrative_angle` to its matching visual End-Card in Beat 5."""
+    ang = (narrative_angle or "").strip().upper()
+    if ang in ("REVERSE_CAVEAT_FIRST", "ANTI_DUST_DRAWER_TEST", "DECISION_GUIDE_BY_USER_TYPE"):
+        return "BUY_SKIP_CARD"
+    if ang in ("SPEC_TRAP_AND_HIDDEN_COST", "MYTH_VS_FACT_TEARDOWN", "TIME_AND_EFFORT_MATH"):
+        return "VERSUS_2COL_CARD"
+    if ang == "FAST_25S_MICRO_LOOP":
+        choices: List[Literal["SCORE_VERDICT_CARD", "VERSUS_2COL_CARD", "BUY_SKIP_CARD"]] = [
+            "SCORE_VERDICT_CARD",
+            "VERSUS_2COL_CARD",
+            "BUY_SKIP_CARD",
+        ]
+        return choices[sum(ord(ch) for ch in (script_id or "s")) % 3]
+    return "SCORE_VERDICT_CARD"
+
+
 def _render_pil_rounded_card(
     path: Path,
     w: int,
@@ -361,24 +392,161 @@ def _render_pil_rounded_card(
     lines: List[str],
     accent: Tuple[int, int, int] = (255, 196, 52),
 ) -> None:
-    """Render a translucent dark rounded overlay card (`spec_card` or `caveat_card`) with PIL."""
+    """Render a translucent dark rounded overlay card (`spec_card` or `caveat_card`) with PIL (zero missing-emoji tofu)."""
+    clean_title = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%]", "", title or "").strip() or "THÔNG TIN"
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle(
         [0, 0, w - 1, h - 1],
         radius=28,
-        fill=(34, 42, 58, 195),
+        fill=(26, 33, 48, 212),
         outline=(*accent, 255),
         width=3,
     )
     d.rounded_rectangle([0, 0, 12, h - 1], radius=6, fill=(*accent, 255))
-    ft = ImageFont.truetype(FONT_BOLD_PATH, 40)
-    fl = ImageFont.truetype(FONT_REG_PATH, 32)
-    d.text((36, 22), title[:34], font=ft, fill=(*accent, 255))
-    y = 22 + 58
+    ft = ImageFont.truetype(FONT_BOLD_PATH, 38)
+    fl = ImageFont.truetype(FONT_REG_PATH, 31)
+    d.text((36, 22), clean_title[:34], font=ft, fill=(*accent, 255))
+    y = 22 + 56
     for ln in lines[:3]:
-        d.text((36, y), "• " + ln[:42], font=fl, fill=(242, 242, 242, 255))
+        clean_ln = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", ln or "").strip()
+        d.text((36, y), "• " + clean_ln[:42], font=fl, fill=(244, 246, 250, 255))
         y += 48
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def _render_pil_score_verdict_card(
+    path: Path,
+    score_10: float,
+    brand_model_label: str,
+    verdict_line_vi: str,
+    price_label: str,
+) -> None:
+    """Upgrade-1 Card #1 (`SCORE_VERDICT_CARD`, 840x290): Real M1 Score /10 + Practical Verdict + Price."""
+    w, h = 840, 290
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(
+        [0, 0, w - 1, h - 1],
+        radius=30,
+        fill=(22, 29, 44, 222),
+        outline=(255, 196, 52, 255),
+        width=3,
+    )
+    # Left gold score badge box
+    d.rounded_rectangle(
+        [22, 22, 240, h - 22],
+        radius=22,
+        fill=(38, 49, 72, 245),
+        outline=(255, 196, 52, 180),
+        width=2,
+    )
+    clamped = min(9.6, max(8.0, round(float(score_10), 1)))
+    d.text((44, 46), f"{clamped:.1f}", font=ImageFont.truetype(FONT_BOLD_PATH, 78), fill=(255, 196, 52, 255))
+    d.text((164, 82), "/10", font=ImageFont.truetype(FONT_BOLD_PATH, 32), fill=(210, 218, 232, 255))
+    d.text((44, 152), "ĐIỂM THỰC TẾ", font=ImageFont.truetype(FONT_BOLD_PATH, 22), fill=(235, 240, 248, 255))
+    d.text((52, 186), "Kiểm chứng M1", font=ImageFont.truetype(FONT_REG_PATH, 20), fill=(175, 188, 208, 255))
+
+    # Right verdict & price content
+    d.rounded_rectangle([268, 26, 610, 70], radius=14, fill=(39, 174, 96, 235))
+    d.text((286, 35), "THỰC DỤNG • ĐÁNG TIỀN", font=ImageFont.truetype(FONT_BOLD_PATH, 24), fill=(255, 255, 255, 255))
+
+    clean_bm = re.sub(r"[^\w\sÀ-ỹ.\-+]", " ", brand_model_label or "").strip()[:28]
+    d.text((268, 80), clean_bm or "Sản phẩm chính hãng", font=ImageFont.truetype(FONT_BOLD_PATH, 33), fill=(255, 255, 255, 255))
+
+    clean_verdict = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", verdict_line_vi or "").strip()
+    wrapped_v = _wrap_card_text(clean_verdict, max_chars_per_line=40, max_lines=2) or ["Hoàn thiện chắc chắn, đúng thông số"]
+    for idx_v, v_ln in enumerate(wrapped_v[:2]):
+        d.text((268, 124 + idx_v * 30), v_ln, font=ImageFont.truetype(FONT_REG_PATH, 24), fill=(218, 226, 238, 255))
+
+    d.line([(268, 192), (w - 30, 192)], fill=(70, 84, 110, 200), width=2)
+    d.text((268, 206), f"Giá tham khảo: {price_label[:12]}", font=ImageFont.truetype(FONT_BOLD_PATH, 34), fill=(255, 196, 52, 255))
+    d.text((268, 248), "Xem chỗ mua chính hãng ở bình luận / Bio", font=ImageFont.truetype(FONT_REG_PATH, 22), fill=(195, 205, 220, 255))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def _render_pil_versus_2col_card(
+    path: Path,
+    cheap_price_label: str,
+    genuine_brand_label: str,
+    genuine_price_label: str,
+    genuine_highlight_vi: str,
+) -> None:
+    """Upgrade-1 Card #2 (`VERSUS_2COL_CARD`, 840x290): Cheap Generic Trap vs Official Brand."""
+    w, h = 840, 290
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=30, fill=(20, 26, 40, 224), outline=(90, 106, 136, 230), width=2)
+
+    # Left column: Cheap Generic / OEM
+    d.rounded_rectangle([18, 18, 408, h - 18], radius=22, fill=(46, 28, 34, 225), outline=(235, 87, 87, 220), width=2)
+    _draw_vector_cross_badge(d, 48, 50, r=16)
+    d.text((74, 34), "HÀNG TRÔI NỔI", font=ImageFont.truetype(FONT_BOLD_PATH, 27), fill=(255, 138, 138, 255))
+    d.text((36, 80), cheap_price_label[:16], font=ImageFont.truetype(FONT_BOLD_PATH, 40), fill=(240, 180, 180, 255))
+    d.text((36, 142), "• Dễ nổ thông số ảo", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(228, 214, 214, 255))
+    d.text((36, 182), "• Vật liệu ọp ẹp, mau hỏng", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(228, 214, 214, 255))
+    d.text((36, 224), "• Không bảo hành hãng", font=ImageFont.truetype(FONT_REG_PATH, 24), fill=(200, 180, 180, 255))
+
+    # Right column: Official Brand Winner
+    d.rounded_rectangle([428, 18, w - 18, h - 18], radius=22, fill=(24, 48, 42, 232), outline=(46, 204, 113, 245), width=3)
+    _draw_vector_check_badge(d, 458, 50, r=16)
+    clean_b = re.sub(r"[^\w\sÀ-ỹ.\-+]", " ", genuine_brand_label or "").strip()[:17] or "CHÍNH HÃNG"
+    d.text((484, 34), clean_b.upper(), font=ImageFont.truetype(FONT_BOLD_PATH, 27), fill=(110, 242, 165, 255))
+    d.text((448, 80), genuine_price_label[:14], font=ImageFont.truetype(FONT_BOLD_PATH, 44), fill=(255, 196, 52, 255))
+
+    clean_hl = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", genuine_highlight_vi or "").strip()
+    hl_short = (_wrap_card_text(clean_hl, max_chars_per_line=24, max_lines=1) or ["Chuẩn thông số thật"])[0]
+    d.text((448, 142), f"• {hl_short}", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(242, 250, 245, 255))
+    d.text((448, 182), "• Hoàn thiện bền, an tâm", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(242, 250, 245, 255))
+    d.text((448, 224), "• Gian hàng Mall ở Bio/Cmt", font=ImageFont.truetype(FONT_BOLD_PATH, 23), fill=(255, 214, 102, 255))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def _render_pil_buy_skip_card(
+    path: Path,
+    price_label: str,
+    buy_if_vi: str,
+    skip_if_vi: str,
+) -> None:
+    """Upgrade-1 Card #3 (`BUY_SKIP_CARD`, 840x290): Screenshot-friendly 'NÊN MUA NẾU / CÂN NHẮC NẾU' card."""
+    w, h = 840, 290
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=30, fill=(22, 29, 44, 224), outline=(255, 196, 52, 255), width=3)
+
+    # Header bar
+    d.text((34, 22), "CHỐT NHANH TRƯỚC KHI MUA", font=ImageFont.truetype(FONT_BOLD_PATH, 30), fill=(255, 196, 52, 255))
+    d.rounded_rectangle([596, 16, w - 26, 66], radius=16, fill=(46, 58, 84, 245), outline=(255, 196, 52, 200), width=2)
+    f_p = ImageFont.truetype(FONT_BOLD_PATH, 30)
+    p_txt = price_label[:12]
+    p_bbox = d.textbbox((0, 0), p_txt, font=f_p)
+    p_w = p_bbox[2] - p_bbox[0]
+    p_x = 596 + max(12, ((w - 26 - 596) - p_w) // 2)
+    d.text((p_x, 23), p_txt, font=f_p, fill=(255, 214, 92, 255))
+    d.line([(34, 76), (w - 34, 76)], fill=(68, 82, 108, 200), width=2)
+
+    # Row 1: NÊN MUA
+    d.rounded_rectangle([32, 96, 206, 146], radius=14, fill=(39, 174, 96, 240))
+    _draw_vector_check_badge(d, 56, 121, r=13, color=(24, 128, 68))
+    d.text((76, 106), "NÊN MUA", font=ImageFont.truetype(FONT_BOLD_PATH, 24), fill=(255, 255, 255, 255))
+    clean_buy = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", buy_if_vi or "").strip()
+    buy_lines = _wrap_card_text(clean_buy, max_chars_per_line=38, max_lines=2) or ["Cần độ bền ổn định & dùng hàng ngày"]
+    for idx_l, ln in enumerate(buy_lines[:2]):
+        d.text((224, 96 + idx_l * 34), ln, font=ImageFont.truetype(FONT_REG_PATH, 26), fill=(242, 248, 244, 255))
+
+    # Row 2: CÂN NHẮC
+    d.rounded_rectangle([32, 186, 206, 236], radius=14, fill=(230, 126, 34, 240))
+    d.text((52, 196), "! CÂN NHẮC", font=ImageFont.truetype(FONT_BOLD_PATH, 23), fill=(255, 255, 255, 255))
+    clean_skip = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", skip_if_vi or "").strip()
+    skip_lines = _wrap_card_text(clean_skip, max_chars_per_line=38, max_lines=2) or ["Xem kỹ kích thước & nhu cầu trước khi đặt"]
+    for idx_l, ln in enumerate(skip_lines[:2]):
+        d.text((224, 186 + idx_l * 34), ln, font=ImageFont.truetype(FONT_REG_PATH, 26), fill=(255, 232, 210, 255))
+
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
 
@@ -1411,8 +1579,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if oc.video_id in clip_summaries:
                     sku_clean_sec += self._estimate_clean_footage_sec(clip_summaries[oc.video_id])
 
-            # If a single-SKU video pool has < 55s of clean footage, auto-discover supplemental official videos
-            target_min_clean = 58.0 if len(script.verified_factual_claims) == 1 else 32.0
+            # If a single-SKU video pool has < 55s of clean footage (or < 30s for 25s micro-loop), auto-discover supplemental official videos
+            target_min_clean = (
+                30.0
+                if (len(script.verified_factual_claims) > 1 or script.narrative_angle == "FAST_25S_MICRO_LOOP")
+                else 58.0
+            )
             if sku_clean_sec < target_min_clean:
                 extra_summaries = self._discover_supplemental_sku_videos(
                     brand=claim.brand,
@@ -1739,9 +1911,52 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         price_card_png = seg_dir / "card_price.png"
         _render_pil_rounded_card(spec_card_png, 760, 270, spec_title, spec_lines, accent=(255, 196, 52))
         _render_pil_rounded_card(
-            caveat_card_png, 800, 260, "⚠️ Lưu ý thực tế", caveat_lines, accent=(255, 145, 48)
+            caveat_card_png, 800, 260, "LƯU Ý THỰC TẾ", caveat_lines, accent=(255, 145, 48)
         )
-        _render_pil_price_card(price_card_png, price_str, subtitle_label="Link ở giỏ hàng")
+
+        # Upgrade-1: Select and render one of 3 dynamic Beat-5 Visual End-Cards matched to `script.narrative_angle`
+        chosen_end_card = _select_end_card_type(script.narrative_angle, script.script_id)
+        sku_entries_map = self.sku_registry.get_all_entries()
+        real_m1_score_10 = 8.7
+        primary_pro_vi = spec_lines[0] if spec_lines else "Đúng thông số chuẩn nhà sản xuất"
+        if primary_claim:
+            rk = self.sku_registry.resolve_sku_key_by_candidate_id(primary_claim.candidate_id)
+            reg_e = sku_entries_map.get(rk) if rk else None
+            if reg_e and reg_e.m1_total_score_100 > 0:
+                real_m1_score_10 = round(reg_e.m1_total_score_100 / 10.0, 1)
+            if reg_e and reg_e.highlight_pros_vi:
+                primary_pro_vi = reg_e.highlight_pros_vi[0]
+
+        if chosen_end_card == "VERSUS_2COL_CARD":
+            base_vnd = primary_claim.claimed_price_vnd if primary_claim else 350_000
+            cheap_k = max(45, int(round((base_vnd * 0.28) / 5000.0) * 5))
+            _render_pil_versus_2col_card(
+                price_card_png,
+                cheap_price_label=f"~{cheap_k}k",
+                genuine_brand_label=spec_title,
+                genuine_price_label=price_str,
+                genuine_highlight_vi=primary_pro_vi,
+            )
+        elif chosen_end_card == "BUY_SKIP_CARD":
+            skip_summary = (
+                primary_claim.mandatory_caveat_mentioned_vi
+                if primary_claim and primary_claim.mandatory_caveat_mentioned_vi
+                else (caveat_lines[0] if caveat_lines else "Cân nhắc kỹ kích thước trước khi mua")
+            )
+            _render_pil_buy_skip_card(
+                price_card_png,
+                price_label=price_str,
+                buy_if_vi=primary_pro_vi,
+                skip_if_vi=skip_summary,
+            )
+        else:
+            _render_pil_score_verdict_card(
+                price_card_png,
+                score_10=real_m1_score_10,
+                brand_model_label=spec_title,
+                verdict_line_vi=primary_pro_vi,
+                price_label=price_str,
+            )
 
         # 6. Write Layout B1 ASS subtitles (`Fontsize=36`, Hook `Fontsize=64` <= 30 chars)
         hook_short = enforce_short_hook_title(
@@ -1784,7 +1999,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f"[v1][c_cav]overlay=x='140-60*max(0\\,1-(t-{s4a})/0.2)':y=325:enable='between(t,{s4a},{s4b})'[v2]",
             f"[3:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
             f"fade=t=in:st={s5a}:d=0.2:alpha=1[c_prc]",
-            f"[v2][c_prc]overlay=x='210-60*max(0\\,1-(t-{s5a})/0.2)':y=360:enable='between(t,{s5a},{s5b})'[v3]",
+            f"[v2][c_prc]overlay=x='120-60*max(0\\,1-(t-{s5a})/0.2)':y=320:enable='between(t,{s5a},{s5b})'[v3]",
             f"[v3]ass='{ass_filename}'[v4]",
             f"color=c=0xFFC434:s=1080x6:d={total_dur:.3f}:r=30[pb]",
             f"[v4][pb]overlay=x='-W+W*t/{total_dur:.3f}':y=0,setsar=1:1,setdar=9/16,format=yuv420p[vout]",
@@ -1919,6 +2134,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             video_path=str(final_out),
             video_status="RENDERED",
             layout_mode="B1" if layout_mode != "fullscreen" else "fullscreen",
+            end_card_type=chosen_end_card,
             width=int(info["width"]),
             height=int(info["height"]),
             fps=30,

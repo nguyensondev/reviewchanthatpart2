@@ -30,7 +30,24 @@ MultiCategorySynergyType = Literal[
     "SINGLE_CATEGORY_ONLY",    # Đợt chạy chỉ có 1 nhóm công năng
 ]
 
+# 6 Upgrade-1 High-Retention Story Formats (plus legacy literals for backward-compatible JSON loading)
+LLMNarrativeAngle = Literal[
+    "REVERSE_CAVEAT_FIRST",       # Bóc điểm trừ thật ngay 3s đầu rồi lật ngược giá trị thực
+    "HYPE_VS_REALITY_TEST",       # Thực chiến hay chỉ làm màu decor? Giải mã bằng cơ chế thật
+    "SPEC_TRAP_AND_HIDDEN_COST",  # Thợ soi thông số ảo trên sàn & Cái giá ngầm của đồ rẻ
+    "ANTI_DUST_DRAWER_TEST",      # Bài test vứt xó: Vì sao dùng mỗi ngày không lười dọn/cất
+    "HABIT_DIAGNOSIS_STORY",      # Bắt bệnh thói quen đời thường (mỏi cổ tay 4h chiều, chói mắt đêm...)
+    "FAST_25S_MICRO_LOOP",        # Siêu tốc 24-28 giây dồn dập (85-110 từ) + câu hỏi chia 2 phe kéo bình luận
+]
+
 NarrativeAngle = Literal[
+    "REVERSE_CAVEAT_FIRST",
+    "HYPE_VS_REALITY_TEST",
+    "SPEC_TRAP_AND_HIDDEN_COST",
+    "ANTI_DUST_DRAWER_TEST",
+    "HABIT_DIAGNOSIS_STORY",
+    "FAST_25S_MICRO_LOOP",
+    # Legacy angles preserved so existing JSON files never fail validation:
     "PAIN_POINT_REALITY_CHECK",
     "MYTH_VS_FACT_TEARDOWN",
     "TIME_AND_EFFORT_MATH",
@@ -166,9 +183,9 @@ class LLMGeneratedScriptDraft(BaseModel):
     script_format: ScriptFormat
     domain: DomainId = Field(default="KITCHEN_TECH", description="Chủ đề gốc của kịch bản (TECH_DESK hoặc KITCHEN_TECH)")
     category_id: str = Field(default="general", description="Mã nhóm công năng chính của kịch bản")
-    narrative_angle: NarrativeAngle = Field(
-        default="PAIN_POINT_REALITY_CHECK",
-        description="Góc tiếp cận kịch bản độc lập để chống trùng lặp cấu trúc",
+    narrative_angle: LLMNarrativeAngle = Field(
+        default="REVERSE_CAVEAT_FIRST",
+        description="1 trong 6 Format kể chuyện Upgrade-1 khớp ngữ cảnh sản phẩm, cấm trùng giữa các kịch bản trong cùng đợt",
     )
     title_vi: str = Field(
         ...,

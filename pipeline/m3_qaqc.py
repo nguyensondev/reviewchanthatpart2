@@ -259,39 +259,50 @@ class M3QAQCEngine:
                 )
             )
 
-        if draft.total_word_count < 115:
+        is_fast_micro = draft.narrative_angle == "FAST_25S_MICRO_LOOP"
+        min_total_words = 75 if is_fast_micro else 115
+        max_total_words = 135 if is_fast_micro else 230
+        min_dur_s = 20.0 if is_fast_micro else 28.0
+        max_dur_s = 35.0 if is_fast_micro else 58.0
+        min_beat_words = 12 if is_fast_micro else 16
+
+        if draft.total_word_count < min_total_words:
             issues.append(
                 QAQCIssueItem(
                     issue_category="SHALLOW_SKU_HIGHLIGHTS",
                     severity="NEEDS_M2_REWRITE",
                     beat_index=None,
                     description_vi=(
-                        f"Kịch bản quá ngắn và sơ sài ({draft.total_word_count} từ < 115 từ), "
+                        f"Kịch bản quá ngắn và sơ sài ({draft.total_word_count} từ < {min_total_words} từ), "
                         "chưa đủ chiều sâu để làm nổi bật các highlight đắt giá của SKU."
                     ),
                     resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 viết sâu sắc hơn.",
                 )
             )
-        elif draft.total_word_count > 230:
+        elif draft.total_word_count > max_total_words:
             issues.append(
                 QAQCIssueItem(
                     issue_category="PACING_OR_LENGTH",
                     severity="NEEDS_M2_REWRITE",
                     beat_index=None,
                     description_vi=(
-                        f"Kịch bản quá dài ({draft.total_word_count} từ > 230 từ), có nguy cơ vượt trần 60s của Shorts."
+                        f"Kịch bản quá dài so với định dạng `{draft.narrative_angle}` ({draft.total_word_count} từ > {max_total_words} từ)."
                     ),
-                    resolution_applied_vi="Đánh FAILED_NEEDS_REWRITE yêu cầu M2 cô đọng lại trong vùng 130–190 từ.",
+                    resolution_applied_vi=(
+                        "Đánh FAILED_NEEDS_REWRITE yêu cầu M2 cô đọng lại trong vùng 85–110 từ."
+                        if is_fast_micro
+                        else "Đánh FAILED_NEEDS_REWRITE yêu cầu M2 cô đọng lại trong vùng 130–190 từ."
+                    ),
                 )
             )
-        elif not (28.0 <= draft.total_duration_sec <= 58.0):
+        elif not (min_dur_s <= draft.total_duration_sec <= max_dur_s):
             issues.append(
                 QAQCIssueItem(
                     issue_category="PACING_OR_LENGTH",
                     severity="WARNING_AUTO_PATCHED",
                     beat_index=None,
                     description_vi=(
-                        f"Tổng thời lượng ước tính {draft.total_duration_sec}s nằm ngoài vùng chuẩn 28s–58s."
+                        f"Tổng thời lượng ước tính {draft.total_duration_sec}s nằm ngoài vùng chuẩn {min_dur_s:.0f}s–{max_dur_s:.0f}s."
                     ),
                     resolution_applied_vi="Cân chỉnh nhịp đọc và phụ đề vừa khung 9:16.",
                 )
@@ -374,17 +385,17 @@ class M3QAQCEngine:
                         ),
                     )
                 )
-            if beat.word_count < 16:
+            if beat.word_count < min_beat_words:
                 issues.append(
                     QAQCIssueItem(
                         issue_category="WEAK_HOOK_OR_TRANSITION",
                         severity="NEEDS_M2_REWRITE",
                         beat_index=beat.beat_index,
                         description_vi=(
-                            f"Phân cảnh #{beat.beat_index} quá ngắn ({beat.word_count} từ < 16 từ), "
+                            f"Phân cảnh #{beat.beat_index} quá ngắn ({beat.word_count} từ < {min_beat_words} từ), "
                             "câu văn cộc lốc thiếu lời dẫn và thiếu thông tin."
                         ),
-                        resolution_applied_vi="Yêu cầu M2 viết lại phân cảnh này đầy đặn (26–40 từ) có lời dẫn tự nhiên.",
+                        resolution_applied_vi="Yêu cầu M2 viết lại phân cảnh này đầy đặn có lời dẫn tự nhiên.",
                     )
                 )
 
@@ -493,10 +504,9 @@ class M3QAQCEngine:
             "NHIỆM VỤ CỐT LÕI (KHÓ TÍNH, CÔNG TÂM, KHÔNG DỄ DÃI CHO QUA KỊCH BẢN SƠ SÀI):\n"
             "1. ĐỐI CHIẾU SỰ THẬT (`FACT_HALLUCINATION`): Mọi thông số kỹ thuật, chất liệu, công suất, giá bán phải KHỚP 100% với HỒ SƠ M1. Nếu M2 tự bịa thông số/giá (VD biến cối kéo tay nhựa PS 180ml 89k thành máy điện thủy tinh 500ml 300W 250k), "
             "BẮT BUỘC gắn lỗi `FACT_HALLUCINATION` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `fact_accuracy_score <= 12.0`, đặt `needs_m2_rewrite = true` và ghi rõ yêu cầu sửa vào `rewrite_instructions_for_m2_vi` (đồng thời vẫn điền bản sửa đúng trong `beats_patched` với `was_auto_patched=true`).\n"
-            "2. KIỂM TRA NHƯỢC ĐIỂM THẬT & SỰ CÔNG TÂM (`MISSING_HONEST_CAVEAT`): Phân cảnh `HONEST_CAVEAT` (Beat 4) PHẢI nói rõ đúng nhược điểm thực tế từ M1 nhưng đặt trong ngữ cảnh khách quan (ai cần lưu ý, vì sao chấp nhận được). "
+            "2. KIỂM TRA NHƯỢC ĐIỂM THẬT & SỰ CÔNG TÂM (`MISSING_HONEST_CAVEAT`): Kịch bản BẮT BUỘC phải nêu rõ đúng nhược điểm thực tế từ M1 ở Beat 4 `HONEST_CAVEAT` (hoặc mở màn ngay ở Beat 1 rồi giải thích thêm ở Beat 4 đối với format `REVERSE_CAVEAT_FIRST`) trong ngữ cảnh khách quan (ai cần lưu ý, vì sao chấp nhận được). "
             "Nếu M2 che giấu nhược điểm hoặc khen hoàn hảo tuyệt đối, BẮT BUỘC gắn `MISSING_HONEST_CAVEAT` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `honest_caveat_score <= 10.0`, đặt `needs_m2_rewrite = true` (và điền bản sửa trung thực trong `beats_patched` với `was_auto_patched=true`).\n"
-            "3. KIỂM ĐỊNH ĐỘ SÂU HIGHLIGHT CỦA SKU (`SHALLOW_SKU_HIGHLIGHTS`): Đối chiếu kịch bản với các `Ưu điểm thật` và `Thông số thật` của Quán quân trong M1. Nếu kịch bản viết hời hợt, bỏ sót điểm sáng quan trọng của SKU, hoặc chỉ đọc tên thông số khô khan như tờ rơi mà không giải thích lợi ích trải nghiệm thực tế, "
-            "hãy gắn `SHALLOW_SKU_HIGHLIGHTS` (`severity=\"NEEDS_M2_REWRITE\"`), trừ điểm và đặt `needs_m2_rewrite = true`, chỉ rõ highlight nào bị bỏ sót trong `rewrite_instructions_for_m2_vi`.\n"
+            "3. KIỂM ĐỊNH ĐỘ SÂU HIGHLIGHT & TÔN TRỌNG 6 FORMAT UPGRADE-1 (`SHALLOW_SKU_HIGHLIGHTS`): Đối chiếu kịch bản với các `Ưu điểm thật` và `Thông số thật` của Quán quân trong M1. Lưu ý: Với format `FAST_25S_MICRO_LOOP`, độ dài chủ đích ngắn gọn dồn dập (80–120 từ, ~25 giây) nên KHÔNG đánh lỗi vì ngắn miễn là súc tích, đúng thông số cốt lõi và có nhược điểm thật. Với 5 format còn lại (`REVERSE_CAVEAT_FIRST`, `HYPE_VS_REALITY_TEST`, `SPEC_TRAP_AND_HIDDEN_COST`, `ANTI_DUST_DRAWER_TEST`, `HABIT_DIAGNOSIS_STORY`), nếu viết hời hợt bỏ sót điểm sáng quan trọng hoặc đọc thông số khô khan như tờ rơi thì gắn `SHALLOW_SKU_HIGHLIGHTS` (`severity=\"NEEDS_M2_REWRITE\"`), đặt `needs_m2_rewrite = true`.\n"
             "4. KIỂM ĐỊNH HOOK MỞ BÀI & LỜI DẪN CHUYỂN Ý (`WEAK_HOOK_OR_TRANSITION`): Mở bài (Beat 1) phải chạm trúng tình huống thực tế cuốn hút; đầu các Beat 2, 3, 4, 5 phải có lời dẫn nối mạch mượt mà; câu văn không được cụt ý hay rời rạc. Nếu mở bài nhạt hoặc thiếu lời dẫn chuyển ý, gắn `WEAK_HOOK_OR_TRANSITION` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `natural_tone_and_logic_score <= 15.0` và đặt `needs_m2_rewrite = true`.\n"
             "5. CHỐNG GƯỢNG ÉP COMBO (`FORCED_COMBO_LOGIC`): Nếu hai SKU cùng công năng khác cỡ mà ép mua cả hai thay vì so sánh chọn 1, gắn `FORCED_COMBO_LOGIC` (`severity=\"NEEDS_M2_REWRITE\"`).\n"
             "6. NGƯỠNG ĐẬU KHẮT KHE (`>= 82.0/100` & `needs_m2_rewrite = false`): Chỉ khi kịch bản đã thực sự cuốn hút, đầy đủ highlight của SKU, lời dẫn mượt mà, đúng sự thật 100% và có nhược điểm công tâm mới được đặt `needs_m2_rewrite = false` và tổng điểm `>= 82.0`. Nếu `needs_m2_rewrite = true`, BẮT BUỘC viết `rewrite_instructions_for_m2_vi` thật chi tiết (chỉ rõ từng beat cần sửa gì để M2 viết lại không lặp lại lỗi cũ).\n"
@@ -638,7 +648,8 @@ Hãy chấm điểm khắt khe, khách quan và xuất JSON theo đúng schema `
                     any_beat_patched = True
 
                 wc = len(tts_vo.split()) if tts_vo else 0
-                dur = round(max(MIN_BEAT_DURATION_SEC, wc / DEFAULT_SPEAKING_RATE_WPS), 1)
+                min_b_dur = 4.2 if draft.narrative_angle == "FAST_25S_MICRO_LOOP" else MIN_BEAT_DURATION_SEC
+                dur = round(max(min_b_dur, wc / DEFAULT_SPEAKING_RATE_WPS), 1)
                 start_s = round(cursor_sec, 1)
                 end_s = round(start_s + dur, 1)
                 cursor_sec = end_s
