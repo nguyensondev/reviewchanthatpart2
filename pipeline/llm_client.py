@@ -176,9 +176,11 @@ class FreeTierGeminiClient:
         system_instruction: Optional[str] = None,
         prefer_lite: bool = False,
         temperature: float = 0.2,
+        image_bytes_list: Optional[List[bytes]] = None,
     ) -> Tuple[T, str]:
         """
         Generate a strictly validated Pydantic model instance using the Free-Tier model chain.
+        Supports multimodal JPEG image inspection when `image_bytes_list` is supplied.
         Returns (validated_pydantic_object, model_name_used).
         """
         chain = EXTRACTION_MODEL_CHAIN if prefer_lite else REASONING_MODEL_CHAIN
@@ -207,10 +209,18 @@ class FreeTierGeminiClient:
                             f"BẮT BUỘC viết lại TOÀN BỘ các trường tiếng Việt CÓ DẤU ĐẦY ĐỦ CHUẨN UTF-8!\n\n{prompt}"
                         )
 
+                    if image_bytes_list:
+                        contents_payload = [
+                            *(types.Part.from_bytes(data=b, mime_type="image/jpeg") for b in image_bytes_list if b),
+                            effective_prompt,
+                        ]
+                    else:
+                        contents_payload = effective_prompt  # type: ignore[assignment]
+
                     self._last_call_ts = time.time()
                     resp = client.models.generate_content(
                         model=model_name,
-                        contents=effective_prompt,
+                        contents=contents_payload,
                         config=cfg,
                     )
                     raw_text = resp.text or ""

@@ -35,6 +35,7 @@ from pipeline.m1_5_combo_curator import M15ComboCuratorEngine
 from pipeline.m1_filter import M1SmartFilterEngine
 from pipeline.m2_script_gen import M2ScriptGeneratorEngine
 from pipeline.m3_qaqc import M3QAQCEngine
+from pipeline.m4_5_video_qaqc import M45VideoQAQCEngine
 from pipeline.m4_video_producer import M4VideoProducerEngine
 from pipeline.m5_publisher import M5PublisherEngine
 from pipeline.publish_packager import (
@@ -267,7 +268,7 @@ def run_planning_batch(topic_hint: Optional[str] = None, max_categories: int = 3
 
 
 def run_single_render_step(ignore_2h_cooldown: bool = False) -> None:
-    """Run M4 (1 video) -> PublishPackager -> M5 (stage SEO & Affiliate payloads) -> StorageGC."""
+    """Run M4 (1 video) -> M4.5 (AI Vision Video QA/QC Gate) -> PublishPackager -> M5 (stage payloads) -> StorageGC."""
     qm = DailyQuotaManager()
     m4_out = M4VideoProducerEngine().run(
         layout_mode="B1",
@@ -277,32 +278,39 @@ def run_single_render_step(ignore_2h_cooldown: bool = False) -> None:
         enforce_sku_cooldown=True,
         quota_mgr=qm,
     )
+    m4_5_report = M45VideoQAQCEngine().run(purge_on_reject=True)
+    approved_video_ids = {
+        v.script_id for v in m4_5_report.audited_videos if v.qaqc_video_status == "APPROVED_VIDEO"
+    }
     manifest = PublishPackager().build_publish_pack()
     M5PublisherEngine().run(live_upload=False)
     StorageGarbageCollector().sweep_all()
 
     if m4_out and m4_out.rendered_videos:
-        rendered_summary = [
-            f"🎬 Đã render mới {len(m4_out.rendered_videos)} video:",
-            *[
-                f"  • {rv.script_id} ({rv.duration_sec}s | giọng {rv.voice_name})"
-                for rv in m4_out.rendered_videos
-            ],
-            f"📦 Tổng video chờ đăng (RENDERED): {manifest.total_rendered_unposted_videos}",
-        ]
-        TelegramNotifier().notify_pipeline_event("🎬 HOÀN TẤT RENDER VIDEO MỚI (M4)", rendered_summary)
+        surviving_rendered = [rv for rv in m4_out.rendered_videos if rv.script_id in approved_video_ids]
+        if surviving_rendered:
+            rendered_summary = [
+                f"🎬 Đã render & vượt qua M4.5 AI Vision QA/QC ({len(surviving_rendered)} video):",
+                *[
+                    f"  • {rv.script_id} ({rv.duration_sec}s | giọng {rv.voice_name})"
+                    for rv in surviving_rendered
+                ],
+                f"📦 Tổng video sạch chờ đăng (RENDERED): {manifest.total_rendered_unposted_videos}",
+            ]
+            TelegramNotifier().notify_pipeline_event("🎬 HOÀN TẤT RENDER & KIỂM ĐỊNH VIDEO MỚI (M4 -> M4.5)", rendered_summary)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Master Daily Pipeline Orchestrator (M0 -> M1 -> M1.5 -> M2 -> M3 -> M4 -> Step A + M5)."
+        description="Master Daily Pipeline Orchestrator (M0 -> M1 -> M1.5 -> M2 -> M3 -> M4 -> M4.5 -> Step A + M5)."
     )
     parser.add_argument(
         "--mode",
-        choices=["status", "plan", "render", "pack", "publish", "shopee-auto", "gc", "auto"],
+        choices=["status", "plan", "render", "video-qaqc", "pack", "publish", "shopee-auto", "gc", "auto"],
         default="status",
         help=(
-            "Execution mode: 'status', 'plan' (M0->M3 once), 'render' (M4 1 video + jittered rest), "
+            "Execution mode: 'status', 'plan' (M0->M3 once), 'render' (M4 1 video + M4.5 Vision QA/QC), "
+            "'video-qaqc' (run M4.5 AI Vision Video QA/QC on all unposted videos), "
             "'pack' (rebuild SEO + Official Shopee Mall publish pack & stage M5 payloads), "
             "'publish' (run Module M5 publisher with human pacing), 'shopee-auto' (re-verify Official Shopee Mall links), "
             "'gc' (run StorageGarbageCollector), 'auto' (smart daily tick)."
@@ -348,7 +356,16 @@ def main() -> int:
             print_pipeline_status()
             return 0
 
+        if args.mode == "video-qaqc":
+            M45VideoQAQCEngine().run(force_reaudit=True, purge_on_reject=True)
+            PublishPackager().build_publish_pack()
+            M5PublisherEngine().run(live_upload=False)
+            StorageGarbageCollector().sweep_all()
+            print_pipeline_status()
+            return 0
+
         if args.mode == "pack":
+            M45VideoQAQCEngine().run(purge_on_reject=True)
             PublishPackager().build_publish_pack()
             M5PublisherEngine().run(live_upload=False)
             StorageGarbageCollector().sweep_all()
@@ -365,6 +382,7 @@ def main() -> int:
                 return 0
 
         if args.mode == "publish":
+            M45VideoQAQCEngine().run(purge_on_reject=True)
             PublishPackager().build_publish_pack()
             M5PublisherEngine().run(live_upload=True)
             print_pipeline_status()
@@ -442,7 +460,8 @@ def main() -> int:
                     flush=True,
                 )
 
-        # Autonomous M5 Live Publish tick inside active human hours
+        # Autonomous M4.5 Video Vision QA/QC + M5 Live Publish tick inside active human hours
+        M45VideoQAQCEngine().run(purge_on_reject=True)
         unposted = vreg.get_rendered_unposted_videos()
         m5_engine = M5PublisherEngine()
         can_pub, pub_reason, wait_pub = m5_engine.can_publish_human_now(force_now=args.ignore_2h_cooldown)

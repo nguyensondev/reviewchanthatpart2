@@ -15,11 +15,57 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from pipeline.core_resilience import atomic_write_json, safe_load_json
 from pipeline.schemas_m0 import YouTubeEvidenceClip
 from pipeline.schemas_m1_5 import normalize_sku_key
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-WHITELIST_PATH = PROJECT_ROOT / "data" / "brand_channel_whitelist.json"
+DATA_DIR = PROJECT_ROOT / "data"
+WHITELIST_PATH = DATA_DIR / "brand_channel_whitelist.json"
+BLACKLIST_VIDEO_IDS_PATH = DATA_DIR / "blacklisted_video_ids.json"
+
+# Hard-blocked non-product / entertainment / movie / CapCut / gaming keywords in video titles or channel names
+FORBIDDEN_NON_PRODUCT_KEYWORDS: set[str] = {
+    "war", "battle", "soldier", "army", "military", "tank", "combat", "weapon",
+    "movie", "movies", "film", "films", "trailer", "teaser", "cinema", "netflix",
+    "capcut", "tiktok", "douyin", "edit", "edits", "amv", "fmv", "gmv",
+    "gameplay", "walkthrough", "esports", "valorant", "pubg", "minecraft", "roblox", "fortnite",
+    "music", "song", "songs", "remix", "ost", "lyrics", "karaoke", "concert",
+    "anime", "manga", "cartoon", "meme", "memes", "funny", "prank", "comedy", "drama",
+    "episode", "season", "vlog", "reaction", "podcast",
+    "phim", "chien tranh", "hoat hinh", "nhac", "bai hat", "hai huoc", "review phim", "tom tat phim",
+}
+
+# Mandatory product / appliance / tech domain anchor keywords (at least 1 whole word/phrase must appear in dynamic video titles)
+PRODUCT_ANCHOR_KEYWORDS: Tuple[str, ...] = (
+    "light", "lamp", "screen", "monitor", "led", "iwok",
+    "mouse", "ergonomic", "lift", "vertical", "wireless", "bluetooth",
+    "stand", "laptop", "holder", "riser", "foldable", "aluminum",
+    "charger", "gan", "charging", "power", "adapter", "station",
+    "hub", "dock", "docking", "usb", "hdmi", "type c", "multiport",
+    "keyboard", "mechanical", "keychron", "switch", "low profile",
+    "arm", "mount", "gas spring", "vesa",
+    "cable", "magnetic", "retractable", "cord",
+    "duster", "vacuum", "cleaner", "blower", "compressed air", "suction",
+    "scale", "weighing", "kitchen", "cooking", "gram", "tanita",
+    "thermometer", "temperature", "probe", "meat", "food",
+    "sealer", "vacuum sealer", "packaging", "preservation",
+    "sprayer", "oil", "mist", "bottle", "dispenser", "soap", "foam", "touchless",
+    "frother", "milk", "coffee", "matcha", "whisk", "espresso", "grinder", "burr",
+    "kettle", "gooseneck", "boiling", "teapot", "timer", "rotary", "stopwatch",
+    "appliance", "appliances", "gadget", "unboxing", "unbox", "setup", "desk",
+    "den", "man hinh", "chuot", "cong thai hoc", "gia do", "ke laptop",
+    "sac", "tram sac", "cu sac", "bo chia", "ban phim", "tay nang", "gia treo",
+    "cap sac", "may thoi", "may hut", "hut bui", "can dien tu", "can tieu ly",
+    "nhiet ke", "hut chan khong", "han mieng tui", "binh xit", "chai xit",
+    "danh bot", "tao bot", "am sieu toc", "am dun", "may xay", "coi xay",
+    "dong ho", "bam gio", "hen gio", "xa phong", "rua chen", "gia dung", "nha bep",
+)
+
+# Short brand names that collide with common words / movie / gaming channels on YouTube
+AMBIGUOUS_SHORT_BRANDS: set[str] = {
+    "bear", "mi", "delux", "simplus", "joyoung", "midea",
+}
 
 
 def _norm_text(s: str) -> str:
@@ -29,12 +75,61 @@ def _norm_text(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", ascii_str).strip()
 
 
+def _has_whole_word(haystack_norm: str, needle_norm: str) -> bool:
+    if not haystack_norm or not needle_norm:
+        return False
+    return bool(re.search(rf"\b{re.escape(needle_norm)}\b", haystack_norm))
+
+
 class OfficialBrandVideoGate:
     """Validates and resolves official brand YouTube videos for candidate SKUs."""
 
-    def __init__(self, whitelist_path: Path = WHITELIST_PATH) -> None:
+    def __init__(
+        self,
+        whitelist_path: Path = WHITELIST_PATH,
+        blacklist_path: Path = BLACKLIST_VIDEO_IDS_PATH,
+    ) -> None:
         self.whitelist_path = whitelist_path
+        self.blacklist_path = blacklist_path
         self.data = self._load()
+
+    def _load_blacklist_map(self) -> Dict[str, Any]:
+        raw = safe_load_json(self.blacklist_path, lambda: {"blacklisted_videos": {}})
+        if isinstance(raw, dict) and isinstance(raw.get("blacklisted_videos"), dict):
+            return raw["blacklisted_videos"]
+        return {}
+
+    def is_video_blacklisted(self, video_id: str) -> bool:
+        if not video_id:
+            return True
+        return video_id in self._load_blacklist_map()
+
+    def blacklist_video_id(self, video_id: str, reason_vi: str, script_id: str = "") -> None:
+        """Permanently blacklist a bad YouTube video_id and delete its local cached MP4/scan files."""
+        if not video_id:
+            return
+        import datetime as dt
+
+        raw = safe_load_json(self.blacklist_path, lambda: {"blacklisted_videos": {}})
+        if not isinstance(raw, dict):
+            raw = {"blacklisted_videos": {}}
+        bmap = raw.setdefault("blacklisted_videos", {})
+        bmap[video_id] = {
+            "video_id": video_id,
+            "reason_vi": reason_vi,
+            "script_id": script_id,
+            "blacklisted_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+        atomic_write_json(self.blacklist_path, raw)
+
+        # Purge cached files for this video_id from m4_video_cache and brand_official_cache
+        for cache_folder in (DATA_DIR / "m4_video_cache", DATA_DIR / "brand_official_cache"):
+            if cache_folder.exists():
+                for fp in cache_folder.glob(f"{video_id}.*"):
+                    try:
+                        fp.unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
     def _load(self) -> Dict[str, Any]:
         if not self.whitelist_path.exists():
@@ -68,21 +163,28 @@ class OfficialBrandVideoGate:
         if not brand_norm or brand_norm in ("oem", "generic"):
             return False
 
+        if self.is_video_blacklisted(clip.video_id):
+            return False
+
         # 1. Check curated official video IDs first
         curated_map = self.data.get("curated_official_videos") or {}
         for _, clip_list in curated_map.items():
             for item in clip_list:
                 if item.get("video_id") == clip.video_id:
-                    # Ensure it belongs to the same brand
                     if brand_norm in _norm_text(item.get("channel", "")) or brand_norm in _norm_text(item.get("title", "")):
                         return True
 
         channel_norm = _norm_text(clip.channel)
         title_norm = _norm_text(clip.title)
-        if not channel_norm:
+        if not channel_norm or not title_norm:
             return False
 
-        # 2. Hard block third-party shops / review channels
+        # 2. Hard block non-product entertainment / war / movie / CapCut / gaming videos
+        for bad_kw in FORBIDDEN_NON_PRODUCT_KEYWORDS:
+            if _has_whole_word(title_norm, bad_kw) or _has_whole_word(channel_norm, bad_kw):
+                return False
+
+        # 3. Hard block third-party shops / review channels
         blocked_kws = self.data.get("blocked_third_party_channel_keywords") or []
         for kw in blocked_kws:
             kw_norm = _norm_text(kw)
@@ -94,25 +196,44 @@ class OfficialBrandVideoGate:
         if any(m in title_norm for m in review_markers):
             return False
 
-        # 3. Verify channel matches official brand channel whitelist (or exact brand name)
+        # 4. Verify channel matches official brand channel whitelist (NEVER blindly trust unlisted brands or bare ambiguous names!)
         official_map: Dict[str, List[str]] = self.data.get("official_brand_channels") or {}
         allowed_channels = official_map.get(brand_norm, []) or official_map.get(brand.lower().strip(), [])
         allowed_norms = {_norm_text(ch) for ch in allowed_channels if ch}
-        allowed_norms.add(brand_norm)
-        allowed_norms.add(f"{brand_norm} official")
-        allowed_norms.add(f"{brand_norm} global")
+        if allowed_channels:
+            allowed_norms.add(f"{brand_norm} official")
+            allowed_norms.add(f"{brand_norm} global")
+            if brand_norm not in AMBIGUOUS_SHORT_BRANDS:
+                allowed_norms.add(brand_norm)
+        else:
+            # Unlisted brand: only trust explicitly suffixed official/global manufacturer channels
+            allowed_norms.add(f"{brand_norm} official")
+            allowed_norms.add(f"{brand_norm} global")
 
         if channel_norm not in allowed_norms:
             return False
 
-        # 4. Verify title references the brand or model code
-        model_norm = _norm_text(model_code or "")
-        model_tokens = [t for t in model_norm.split() if len(t) >= 2 and t not in ("series", "pro", "plus")]
-        if model_tokens:
-            if not any(tok in title_norm for tok in model_tokens) and brand_norm not in title_norm:
-                return False
-        elif brand_norm not in title_norm:
+        # 5. For ambiguous short brand channels (like "Bear", "Mi"), require explicit official channel suffix or model+anchor match
+        if brand_norm in AMBIGUOUS_SHORT_BRANDS and channel_norm in ("bear", "mi", "delux"):
             return False
+
+        # 6. Mandatory Product Anchor Keyword Gate: video title MUST contain at least 1 real appliance/tech keyword
+        if not any(_has_whole_word(title_norm, anchor) for anchor in PRODUCT_ANCHOR_KEYWORDS):
+            return False
+
+        # 7. Whole-Word Brand + Model Verification (no 2-char substring false matches like 'vs' or 'm1'!)
+        if not _has_whole_word(title_norm, brand_norm):
+            return False
+
+        model_norm = _norm_text(model_code or "")
+        model_tokens = [
+            t for t in model_norm.split()
+            if (len(t) >= 3 or (len(t) == 2 and any(ch.isdigit() for ch in t)))
+            and t not in ("series", "pro", "plus", "mini", "max", "lite")
+        ]
+        if model_tokens:
+            if not any(_has_whole_word(title_norm, tok) for tok in model_tokens):
+                return False
 
         return True
 
@@ -137,7 +258,7 @@ class OfficialBrandVideoGate:
         for key in (sku_key, cand_key):
             for item in curated_map.get(key, []):
                 vid = item.get("video_id")
-                if vid and vid not in seen_ids:
+                if vid and vid not in seen_ids and not self.is_video_blacklisted(vid):
                     seen_ids.add(vid)
                     verified.append(YouTubeEvidenceClip.model_validate(item))
 

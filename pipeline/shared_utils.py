@@ -126,7 +126,7 @@ def check_vietnamese_diacritics(
 
     ratio = round(accented_count / len(vi_eval_tokens), 3)
 
-    if max_consecutive_unaccented >= 6:
+    if (max_consecutive_unaccented >= 6 and ratio < 0.65) or max_consecutive_unaccented >= 9:
         return (
             False,
             ratio,

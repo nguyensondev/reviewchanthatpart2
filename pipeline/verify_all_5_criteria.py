@@ -55,6 +55,7 @@ STAGE_MODULES: Dict[str, str] = {
     "M2": "m2_script_gen",
     "M3": "m3_qaqc",
     "M4": "m4_video_producer",
+    "M4.5": "m4_5_video_qaqc",
     "M5": "m5_publisher",
 }
 
@@ -174,12 +175,38 @@ def verify_criterion_4_copyright_and_shopee_stealth() -> None:
     assert len(tracks) == 4 and (BGM_DIR / "license.json").exists()
     print(f"  [PASS] 4 bản nhạc nền BGM tự tổng hợp sóng âm CC0 (0% Content-ID): {[t.name for t in tracks]}", flush=True)
 
-    # 2. Verify Max Continuous Visual Cut Cap <= 3.6s & Official Brand Gate
+    # 2. Verify Max Continuous Visual Cut Cap <= 3.6s & Official Brand Gate (including War/CapCut/Ambiguous Channel Block!)
     assert MAX_CONTINUOUS_SHOT_SEC <= 3.6
     gate = OfficialBrandVideoGate()
     assert len(gate.data.get("official_brand_channels") or {}) >= 30
+    from pipeline.schemas_m0 import YouTubeEvidenceClip
+
+    war_capcut_clip = YouTubeEvidenceClip(
+        video_id="fake_war_capcut_999",
+        url="https://www.youtube.com/watch?v=fake_war_capcut_999",
+        title="Bear VS-01 War Movie Battle Scene Edit CapCut",
+        channel="Bear",
+        duration_sec=55,
+    )
+    ambiguous_bear_clip = YouTubeEvidenceClip(
+        video_id="fake_bear_random_888",
+        url="https://www.youtube.com/watch?v=fake_bear_random_888",
+        title="Bear FKJ-B01F1 Epic Trailer 2026",
+        channel="Bear Official",
+        duration_sec=45,
+    )
+    valid_bear_appliance_clip = YouTubeEvidenceClip(
+        video_id="valid_bear_sealer_777",
+        url="https://www.youtube.com/watch?v=valid_bear_sealer_777",
+        title="Bear FKJ-B01F1 Kitchen Vacuum Sealer Official Product Intro",
+        channel="Bear Appliances",
+        duration_sec=60,
+    )
+    assert gate.is_official_brand_clip(war_capcut_clip, "Bear", "VS-01") is False, "War/CapCut clip MUST be blocked!"
+    assert gate.is_official_brand_clip(ambiguous_bear_clip, "Bear", "FKJ-B01F1") is False, "Non-appliance trailer MUST be blocked!"
+    assert gate.is_official_brand_clip(valid_bear_appliance_clip, "Bear", "FKJ-B01F1") is True, "Valid Bear appliance clip should pass!"
     print(
-        f"  [PASS] Visual Content-ID Guard: Mọi cú cắt hình liên tục đều <= {MAX_CONTINUOUS_SHOT_SEC}s + tước 100% audio gốc (`-an`).",
+        f"  [PASS] Visual Content-ID & Brand Gate: Cắt hình <= {MAX_CONTINUOUS_SHOT_SEC}s + tước audio (`-an`) + khóa cứng kênh trùng tên/phim/CapCut.",
         flush=True,
     )
 

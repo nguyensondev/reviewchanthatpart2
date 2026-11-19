@@ -21,6 +21,8 @@ data/*.tmp.*
 data/brand_official_cache/
 data/m4_video_cache/
 data/m4_work/
+data/m4_5_storyboards/
+data/blacklisted_video_ids.json
 data/daily_quota_state.json
 data/m0_candidate_pool.json
 data/m0_history.json
@@ -29,6 +31,7 @@ data/m1_5_combo_result.json
 data/m2_script_drafts.json
 data/m3_approved_scripts.json
 data/m4_production_output.json
+data/m4_5_video_qaqc_report.json
 data/m5_publish_report.json
 data/m5_publish_state.json
 data/manual_affiliate_links.json

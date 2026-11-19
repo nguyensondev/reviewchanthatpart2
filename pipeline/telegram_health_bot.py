@@ -294,6 +294,18 @@ class PipelineHealthInspector:
                 f"{icon} M4 (Dựng video 9:16): {len(rvs)} video chờ đăng{miss_txt} ({_short_ts(str(d.get('generated_at') or ''))})"
             )
 
+        # M4.5
+        ok, d, err = _read_json_strict(DATA_DIR / "m4_5_video_qaqc_report.json")
+        if not ok:
+            lines.append("⚪ M4.5 (Kiểm định hình ảnh AI Vision): Chưa có lượt quét mới")
+        else:
+            app_v = int(d.get("approved_video_count") or 0)
+            rej_v = int(d.get("rejected_video_count") or 0)
+            icon = "🟢" if rej_v == 0 else "🟡"
+            lines.append(
+                f"{icon} M4.5 (Kiểm định hình ảnh AI Vision): {app_v} đạt / {rej_v} đã chặn & xóa ({_short_ts(str(d.get('generated_at') or ''))})"
+            )
+
         # M5
         ok, d, err = _read_json_strict(DATA_DIR / "m5_publish_report.json")
         if not ok:
