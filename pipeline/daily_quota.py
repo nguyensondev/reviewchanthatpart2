@@ -43,9 +43,10 @@ class DailyQuotaManager:
         self.state_path = state_path
         self.cooldown_seconds = cooldown_seconds
 
-    def today_key(self) -> str:
+    def today_key(self, now: Optional[dt.datetime] = None) -> str:
         """Return current local calendar date string (YYYY-MM-DD)."""
-        return dt.datetime.now().strftime("%Y-%m-%d")
+        now_dt = now or dt.datetime.now().astimezone()
+        return now_dt.strftime("%Y-%m-%d")
 
     def _load_state(self) -> Dict[str, Any]:
         data = safe_load_json(self.state_path, lambda: {"days": {}})
@@ -131,24 +132,24 @@ class DailyQuotaManager:
 
     # --- Video Quota & 2-Hour Cooldown (M4: max 3/day, >=2h rest after each render) ---
 
-    def get_video_quota_status(self) -> Tuple[int, int, List[str]]:
+    def get_video_quota_status(self, now: Optional[dt.datetime] = None) -> Tuple[int, int, List[str]]:
         state = self._load_state()
-        bucket = self._ensure_day_bucket(state, self.today_key())
+        bucket = self._ensure_day_bucket(state, self.today_key(now))
         ids = list(bucket["rendered_video_script_ids"])
         used = len(ids)
         remaining = max(0, MAX_VIDEOS_PER_DAY - used)
         return used, remaining, ids
 
-    def get_rendered_voices_today(self) -> List[str]:
+    def get_rendered_voices_today(self, now: Optional[dt.datetime] = None) -> List[str]:
         state = self._load_state()
-        bucket = self._ensure_day_bucket(state, self.today_key())
+        bucket = self._ensure_day_bucket(state, self.today_key(now))
         return list(bucket.get("rendered_voices_today", []))
 
     def get_cooldown_status(self, now: Optional[dt.datetime] = None) -> Dict[str, Any]:
         """Return current 2-hour cooldown timer metadata."""
         now_dt = now or dt.datetime.now().astimezone()
         state = self._load_state()
-        bucket = self._ensure_day_bucket(state, self.today_key())
+        bucket = self._ensure_day_bucket(state, self.today_key(now_dt))
         next_allowed_str = str(bucket.get("next_render_allowed_at") or "")
         seconds_to_wait = 0
         is_resting = False
@@ -166,7 +167,8 @@ class DailyQuotaManager:
         return {
             "is_resting": is_resting,
             "seconds_until_next_render": seconds_to_wait,
-            "next_render_allowed_at": next_allowed_str,
+            "next_render_allowed_at": next_allowed_str if is_resting else "",
+            "raw_next_render_allowed_at": next_allowed_str,
             "last_render_started_at": str(bucket.get("last_render_started_at") or ""),
             "last_render_finished_at": str(bucket.get("last_render_finished_at") or ""),
             "last_render_duration_sec": float(bucket.get("last_render_duration_sec") or 0.0),
@@ -216,7 +218,7 @@ class DailyQuotaManager:
             if not in_hours:
                 return False, "OUTSIDE_HUMAN_ACTIVE_HOURS", wait_hours
 
-        used, _, ids = self.get_video_quota_status()
+        used, _, ids = self.get_video_quota_status(now=now_dt)
         is_same_rerender = bool(allow_rerender_same_id and script_id and script_id in ids)
 
         if not is_same_rerender and used >= MAX_VIDEOS_PER_DAY:
@@ -234,7 +236,7 @@ class DailyQuotaManager:
         now_dt = now or dt.datetime.now().astimezone()
         now_iso = now_dt.isoformat(timespec="seconds")
         state = self._load_state()
-        bucket = self._ensure_day_bucket(state, self.today_key())
+        bucket = self._ensure_day_bucket(state, self.today_key(now_dt))
         bucket["last_render_started_at"] = now_iso
         bucket["updated_at"] = now_iso
         self._save_state(state)
@@ -260,7 +262,7 @@ class DailyQuotaManager:
         next_allowed_iso = next_allowed_dt.isoformat(timespec="seconds")
 
         state = self._load_state()
-        bucket = self._ensure_day_bucket(state, self.today_key())
+        bucket = self._ensure_day_bucket(state, self.today_key(now_dt))
         if script_id not in bucket["rendered_video_script_ids"]:
             bucket["rendered_video_script_ids"].append(script_id)
         if voice_name:
@@ -284,6 +286,95 @@ class DailyQuotaManager:
         bucket.setdefault("render_events", []).append(event)
         self._save_state(state)
         return event
+
+    def refund_rejected_or_deleted_video(
+        self,
+        script_id: str,
+        now: Optional[dt.datetime] = None,
+    ) -> bool:
+        """
+        Roll back M3/M4 daily quota & 2-hour render cooldown when a rendered video is rejected
+        and deleted by M4.5 Vision QA/QC (or manually deleted before publishing).
+        """
+        if not script_id:
+            return False
+        now_dt = now or dt.datetime.now().astimezone()
+        state = self._load_state()
+        days = state.get("days")
+        if not isinstance(days, dict):
+            return False
+
+        changed = False
+        for _, bucket in days.items():
+            if not isinstance(bucket, dict):
+                continue
+            r_ids = bucket.get("rendered_video_script_ids")
+            if isinstance(r_ids, list) and script_id in r_ids:
+                r_ids.remove(script_id)
+                changed = True
+            a_ids = bucket.get("approved_script_ids")
+            if isinstance(a_ids, list) and script_id in a_ids:
+                a_ids.remove(script_id)
+                changed = True
+            events = bucket.get("render_events")
+            if isinstance(events, list):
+                surviving_events = [
+                    ev for ev in events
+                    if isinstance(ev, dict) and ev.get("script_id") != script_id
+                ]
+                if len(surviving_events) != len(events):
+                    bucket["render_events"] = surviving_events
+                    if surviving_events:
+                        last_ev = surviving_events[-1]
+                        bucket["next_render_allowed_at"] = str(last_ev.get("next_render_allowed_at") or "")
+                        bucket["last_render_started_at"] = str(last_ev.get("render_started_at") or "")
+                        bucket["last_render_finished_at"] = str(last_ev.get("render_finished_at") or "")
+                        bucket["last_render_duration_sec"] = float(last_ev.get("render_duration_sec") or 0.0)
+                    else:
+                        bucket["next_render_allowed_at"] = ""
+                        bucket["last_render_started_at"] = ""
+                        bucket["last_render_finished_at"] = ""
+                        bucket["last_render_duration_sec"] = 0.0
+                    changed = True
+
+        if changed:
+            self._save_state(state)
+        return changed
+
+    def get_next_render_schedule_summary_vi(
+        self,
+        now: Optional[dt.datetime] = None,
+        unposted_count: int = 0,
+    ) -> str:
+        """
+        Compute a live, never-in-the-past Vietnamese schedule string for Module M4.
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        if unposted_count >= 2:
+            return f"⏸️ Tạm ngưng (đã có {unposted_count} video chờ M5 đăng)"
+
+        can_now, reason, wait_sec = self.can_render_video_now(
+            allow_rerender_same_id=False,
+            ignore_cooldown=False,
+            now=now_dt,
+        )
+        if can_now:
+            return "🟢 Sẵn sàng render ngay (ở chu kỳ kế tiếp)"
+
+        target_dt = now_dt + dt.timedelta(seconds=max(0, int(wait_sec)))
+        target_str = target_dt.strftime("%d/%m %H:%M")
+        mins_left = max(1, int(round(wait_sec / 60.0)))
+
+        if reason.startswith("WEEKLY_REST_DAY_OFF"):
+            return f"🏖️ Nghỉ ngày ngẫu nhiên trong tuần — Mở lại {target_str}"
+        if reason == "QUOTA_REACHED_SLEEP_UNTIL_TOMORROW":
+            used, _, _ = self.get_video_quota_status(now=now_dt)
+            return f"✅ Đã đủ quota render hôm nay ({used}/{MAX_VIDEOS_PER_DAY}) — Mở lại {target_str}"
+        if reason == "OUTSIDE_HUMAN_ACTIVE_HOURS":
+            return f"🌙 Chờ khung giờ hoạt động — Mở lúc {target_str} (còn {mins_left} phút)"
+        if reason == "COOLDOWN_RESTING_2H":
+            return f"⏳ Đang nghỉ 2h sau lần render trước — Tiếp theo lúc {target_str} (còn {mins_left} phút)"
+        return f"⏳ {reason} — Mở lúc {target_str} (còn {mins_left} phút)"
 
     def get_sleep_until_tomorrow_info(self, now: Optional[dt.datetime] = None) -> Dict[str, Any]:
         now_dt = now or dt.datetime.now().astimezone()

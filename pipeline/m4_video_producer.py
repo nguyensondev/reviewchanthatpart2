@@ -2541,7 +2541,32 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             quota_mgr=quota_mgr,
         )
 
-        atomic_write_text(output_json_path, output_obj.model_dump_json(indent=2))
+        # Preserve previously rendered unposted videos in `m4_production_output.json` on disk
+        # so single-video steps (`max_videos=1`) or cooldown checks never overwrite waiting videos' metadata
+        existing_unposted_items: List[RenderedVideoItem] = []
+        if output_json_path.exists():
+            try:
+                prev_m4 = M4ProductionOutput.model_validate_json(
+                    output_json_path.read_text(encoding="utf-8")
+                )
+                unposted_ids = {
+                    e.script_id for e in self.video_registry.get_rendered_unposted_videos()
+                }
+                new_ids = {rv.script_id for rv in output_obj.rendered_videos}
+                for prv in prev_m4.rendered_videos:
+                    if prv.script_id in unposted_ids and prv.script_id not in new_ids:
+                        mp4_p = MacOSLegacyRuntime.resolve_portable_video_path(
+                            prv.video_path, prv.script_id
+                        )
+                        if mp4_p.exists():
+                            existing_unposted_items.append(prv)
+            except Exception:
+                pass
+
+        persisted_obj = output_obj.model_copy(
+            update={"rendered_videos": existing_unposted_items + list(output_obj.rendered_videos)}
+        )
+        atomic_write_text(output_json_path, persisted_obj.model_dump_json(indent=2))
         StorageGarbageCollector().sweep_all()
         print(f"[M4] Wrote production contract atomically to: {output_json_path}", flush=True)
         return output_obj

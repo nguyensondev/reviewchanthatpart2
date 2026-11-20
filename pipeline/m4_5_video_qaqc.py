@@ -30,6 +30,7 @@ from pipeline.core_resilience import (
     atomic_write_text,
     safe_load_json,
 )
+from pipeline.daily_quota import DailyQuotaManager
 from pipeline.llm_client import FreeTierGeminiClient
 from pipeline.schemas_m4 import M4ProductionOutput, RenderedVideoItem
 from pipeline.schemas_m4_5 import (
@@ -231,6 +232,8 @@ class M45VideoQAQCEngine:
 
         self.video_registry.delete_entry(script_id)
         self.video_registry.purge_script_from_m2_m3_files(script_id)
+        DailyQuotaManager().refund_rejected_or_deleted_video(script_id)
+        self.sku_registry.refund_rejected_video_skus(script_id)
 
         if self.m4_output_path.exists():
             try:

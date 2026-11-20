@@ -134,18 +134,23 @@ def print_pipeline_status() -> None:
         f"• Quota Render Video (M4): {v_used}/{MAX_VIDEOS_PER_DAY} đã render hôm nay (còn lại: {v_rem})",
         flush=True,
     )
-    m5_u, m5_lim, m5_rem, _ = M5PublisherEngine().get_daily_publish_quota_status()
+    rendered_unposted = vreg.get_rendered_unposted_videos()
+    m5_engine = M5PublisherEngine()
+    m5_u, m5_lim, m5_rem, _ = m5_engine.get_daily_publish_quota_status()
     print(
         f"• Quota Đăng Bài (M5)    : {m5_u}/{m5_lim} đã đăng hôm nay (random 1-2 video/ngày, còn lại: {m5_rem})",
         flush=True,
     )
     print(
-        f"• Nhịp nghỉ 2h (M4)      : status={cd_status} | can_render_now={can_now} | "
-        f"wait={wait_secs}s (next_allowed={cd['next_render_allowed_at'] or 'NOW'})",
+        f"• Lịch Render M4         : {qm.get_next_render_schedule_summary_vi(unposted_count=len(rendered_unposted))} "
+        f"(status={cd_status} | wait={wait_secs}s)",
+        flush=True,
+    )
+    print(
+        f"• Lịch Đăng Bài M5       : {m5_engine.get_next_publish_schedule_summary_vi(unposted_count=len(rendered_unposted))}",
         flush=True,
     )
 
-    rendered_unposted = vreg.get_rendered_unposted_videos()
     ready_scripts, waiting_scripts = get_ready_queued_scripts(vreg, sreg, qm)
 
     print("\n--- [1] SỔ TRẠNG THÁI VIDEO (`data/video_registry.json`) ---", flush=True)
@@ -421,6 +426,11 @@ def main() -> int:
             StorageGarbageCollector().sweep_all()
             print_pipeline_status()
             return 0
+
+        # First sweep deleted/corrupted files & audit any unposted videos with M4.5 Vision QA/QC
+        # so any bad video is immediately purged and its M4 quota/cooldown refunded before checking M4 queue
+        StorageGarbageCollector().sweep_all()
+        M45VideoQAQCEngine().run(purge_on_reject=True)
 
         qm = DailyQuotaManager()
         vreg = VideoRegistryManager()

@@ -170,6 +170,27 @@ class M5PublisherEngine:
         rem = max(0, limit - used)
         return used, limit, rem, pub_ids
 
+    def _has_partial_video_to_resume(
+        self,
+        script_id: Optional[str] = None,
+        pub_ids_today: Optional[List[str]] = None,
+    ) -> bool:
+        """
+        Return True if `script_id` (or any currently `RENDERED` unposted video when `script_id is None`)
+        has already uploaded to 1 platform (`len(published_platforms) > 0`) and needs to finish its 2nd platform.
+        """
+        today_set = set(pub_ids_today or [])
+        if script_id:
+            if script_id in today_set:
+                return True
+            entry = self.video_registry.get_entry(script_id)
+            return bool(entry and entry.status == "RENDERED" and len(entry.published_platforms) > 0)
+
+        for entry in self.video_registry.get_rendered_unposted_videos():
+            if entry.script_id in today_set or len(entry.published_platforms) > 0:
+                return True
+        return False
+
     def can_publish_human_now(
         self,
         force_now: bool = False,
@@ -191,9 +212,12 @@ class M5PublisherEngine:
 
         used_today, limit_today, rem_today, pub_ids_today = self.get_daily_publish_quota_status(now=now_dt)
 
-        # Allow finishing the second platform for a video already counted in today's quota
-        is_resuming_today_video = bool(script_id and script_id in pub_ids_today)
-        if not force_now and not is_resuming_today_video and rem_today <= 0:
+        # Allow finishing the second platform for a video already partially uploaded
+        is_resuming_partial_video = self._has_partial_video_to_resume(
+            script_id=script_id,
+            pub_ids_today=pub_ids_today,
+        )
+        if not force_now and not is_resuming_partial_video and rem_today <= 0:
             tomorrow_start, _ = HumanBehaviorGuard.get_daily_active_window(now=now_dt + dt.timedelta(days=1))
             wait_tomorrow = max(60, int((tomorrow_start - now_dt).total_seconds()))
             return False, f"DAILY_M5_QUOTA_REACHED_{used_today}_OF_{limit_today}", wait_tomorrow
@@ -219,6 +243,39 @@ class M5PublisherEngine:
                 pass
         return True, "READY", 0
 
+    def get_next_publish_schedule_summary_vi(
+        self,
+        now: Optional[dt.datetime] = None,
+        unposted_count: Optional[int] = None,
+    ) -> str:
+        """
+        Compute a live, never-in-the-past Vietnamese schedule string for Module M5.
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        if unposted_count is None:
+            unposted_count = len(self.video_registry.get_rendered_unposted_videos())
+
+        can_pub, reason, wait_sec = self.can_publish_human_now(force_now=False, now=now_dt)
+        if can_pub:
+            if unposted_count > 0:
+                return f"🟢 Sẵn sàng đăng ngay ({unposted_count} video chờ, sẽ đăng ở chu kỳ kế tiếp)"
+            return "🟢 Đã mở khóa (đang chờ M4 render video mới)"
+
+        target_dt = now_dt + dt.timedelta(seconds=max(0, int(wait_sec)))
+        target_str = target_dt.strftime("%d/%m %H:%M")
+        mins_left = max(1, int(round(wait_sec / 60.0)))
+
+        if reason.startswith("WEEKLY_REST_DAY_OFF"):
+            return f"🏖️ Nghỉ ngày ngẫu nhiên trong tuần — Mở lại {target_str}"
+        if reason.startswith("DAILY_M5_QUOTA_REACHED"):
+            used_today, limit_today, _, _ = self.get_daily_publish_quota_status(now=now_dt)
+            return f"✅ Đã đủ quota đăng hôm nay ({used_today}/{limit_today}) — Mở lại {target_str}"
+        if reason == "OUTSIDE_HUMAN_ACTIVE_HOURS":
+            return f"🌙 Chờ khung giờ hoạt động — Mở lúc {target_str} (còn {mins_left} phút)"
+        if reason == "HUMAN_INTER_POST_COOLDOWN":
+            return f"⏳ Nghỉ giãn cách sau bài trước — Tiếp theo lúc {target_str} (còn {mins_left} phút)"
+        return f"⏳ {reason} — Mở lúc {target_str} (còn {mins_left} phút)"
+
     def _record_human_publish_event(self, script_id: str, platforms: List[str]) -> str:
         now_dt = dt.datetime.now().astimezone()
         day_key = now_dt.strftime("%Y-%m-%d")
@@ -228,6 +285,16 @@ class M5PublisherEngine:
 
         st = self._load_m5_state()
         days = st.setdefault("days", {})
+
+        # Check if `script_id` was already counted in an earlier day's quota (partial upload resumed today)
+        already_counted_prior_day = False
+        for old_day_key, old_bucket in days.items():
+            if old_day_key != day_key and isinstance(old_bucket, dict):
+                old_list = old_bucket.get("published_script_ids")
+                if isinstance(old_list, list) and script_id in old_list:
+                    already_counted_prior_day = True
+                    break
+
         bucket = days.setdefault(
             day_key,
             {
@@ -236,7 +303,7 @@ class M5PublisherEngine:
             },
         )
         pub_list = bucket.setdefault("published_script_ids", [])
-        if script_id and script_id not in pub_list:
+        if script_id and script_id not in pub_list and not already_counted_prior_day:
             pub_list.append(script_id)
 
         st["next_publish_allowed_at"] = next_iso
@@ -817,12 +884,20 @@ class M5PublisherEngine:
 
             results.append(item_res)
 
+        can_after, _, wait_after = self.can_publish_human_now(force_now=force_now)
+        if not can_after and wait_after > 0:
+            effective_next_allowed = (
+                dt.datetime.now().astimezone() + dt.timedelta(seconds=wait_after)
+            ).isoformat(timespec="seconds")
+        else:
+            effective_next_allowed = ""
+
         report = M5PublishReport(
             m5_run_id=run_id,
             generated_at=now_iso,
             mode="LIVE_UPLOAD" if live_upload else "STAGE_ONLY",
-            active_hours_ok=can_pub_now,
-            next_human_publish_allowed_at=next_allowed_str,
+            active_hours_ok=can_after,
+            next_human_publish_allowed_at=effective_next_allowed,
             total_candidates=len(results),
             validated_ready_count=validated_count,
             published_count=published_count,

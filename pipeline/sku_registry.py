@@ -286,3 +286,48 @@ class SKURegistryManager:
 
         self._save_raw(raw)
         return updated_entries
+
+    def refund_rejected_video_skus(self, script_id: str) -> bool:
+        """
+        Roll back `solo_video_script_ids` / `combo_video_script_ids` and SKU cooldown lock
+        when a rendered video is rejected and purged by M4.5 Vision QA/QC.
+        """
+        if not script_id:
+            return False
+        raw = self._load_raw()
+        items = raw.get("items")
+        if not isinstance(items, dict):
+            return False
+
+        changed = False
+        now_iso = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        for _, entry_dict in items.items():
+            if not isinstance(entry_dict, dict):
+                continue
+            solo_list = list(entry_dict.get("solo_video_script_ids") or [])
+            combo_list = list(entry_dict.get("combo_video_script_ids") or [])
+            item_changed = False
+            if script_id in solo_list:
+                solo_list.remove(script_id)
+                entry_dict["solo_video_script_ids"] = solo_list
+                entry_dict["has_solo_video"] = bool(solo_list)
+                item_changed = True
+            if script_id in combo_list:
+                combo_list.remove(script_id)
+                entry_dict["combo_video_script_ids"] = combo_list
+                entry_dict["has_combo_video"] = bool(combo_list)
+                item_changed = True
+            if item_changed:
+                has_solo = bool(entry_dict.get("has_solo_video", False))
+                has_combo = bool(entry_dict.get("has_combo_video", False))
+                entry_dict["lifecycle_status"] = compute_sku_lifecycle_status(has_solo, has_combo)
+                if not has_solo and not has_combo:
+                    entry_dict["cooldown_days"] = 0
+                    entry_dict["next_eligible_at"] = None
+                    entry_dict["last_rendered_at"] = None
+                entry_dict["updated_at"] = now_iso
+                changed = True
+
+        if changed:
+            self._save_raw(raw)
+        return changed
