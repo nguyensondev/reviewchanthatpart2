@@ -65,6 +65,7 @@ from pipeline.daily_quota import (
 )
 from pipeline.schemas_m1_5 import normalize_sku_key
 from pipeline.schemas_m3 import AuditedBeatSegment, AuditedScriptItem, M3ApprovedScriptsOutput
+from pipeline.schemas_m_trend import load_active_trend_opportunities
 from pipeline.schemas_m4 import (
     M4ProductionOutput,
     RenderedVideoItem,
@@ -2207,12 +2208,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             available_domains = {c.domain for c in non_overlapping}
             missing_domains = available_domains - selected_domains
+            fast_track_cats = {
+                t.product_concept_id
+                for t in load_active_trend_opportunities()
+                if t.priority_tier == "FAST_TRACK_TREND"
+            }
 
-            def _diversity_score(item: AuditedScriptItem) -> tuple[int, int, int, int]:
+            def _diversity_score(item: AuditedScriptItem) -> tuple[int, int, int, int, int]:
                 item_skus = self._get_script_sku_keys(item)
                 # Prefer scripts that don't block 2 other solo scripts in the same batch when 3 distinct solos exist
                 is_solo = item.script_format == "SINGLE_SKU_DEEP_DIVE"
                 return (
+                    1 if item.category_id in fast_track_cats else 0,
                     1 if item.domain in missing_domains else 0,
                     1 if item.category_id not in selected_cats else 0,
                     1 if not (item_skus & selected_skus) else 0,

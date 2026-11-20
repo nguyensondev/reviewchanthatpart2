@@ -215,6 +215,18 @@ class PipelineHealthInspector:
             "",
         ]
 
+        # M_TREND
+        ok, d, err = _read_json_strict(DATA_DIR / "m_trend_opportunities.json")
+        if not ok:
+            lines.append("⚪ M_TREND (Quét xu hướng SKU): Chưa có lượt quét mới")
+        else:
+            t_cnt = int(d.get("total_active_opportunities") or 0)
+            t_rc = str(d.get("status_reason_code") or "UNKNOWN")
+            t_icon = "🔴" if t_rc == "ERROR_COLLECTOR_FAILURE" else ("🟡" if t_rc == "WARNING_LOGIC_ZERO_MATCH" else "🟢")
+            lines.append(
+                f"{t_icon} M_TREND (Xu hướng SKU): {t_cnt} cơ hội hoạt động | {t_rc} ({_short_ts(str(d.get('generated_at_local') or ''))})"
+            )
+
         # M0
         ok, d, err = _read_json_strict(DATA_DIR / "m0_candidate_pool.json")
         if not ok:
@@ -474,9 +486,10 @@ class TelegramHealthBot:
 
     MENU_COMMANDS = [
         {"command": "health", "description": "Kiểm tra sức khỏe tổng quan của tool"},
-        {"command": "modules", "description": "Kiểm tra tình trạng từng module M0–M5"},
+        {"command": "modules", "description": "Kiểm tra tình trạng từng module M_TREND–M5"},
         {"command": "errors", "description": "Kiểm tra lỗi gần đây & cảnh báo"},
         {"command": "status", "description": "Xem quota hôm nay & hàng đợi video"},
+        {"command": "trend", "description": "Quét Trend & Cơ hội SKU mới nhất (M_TREND)"},
         {"command": "update", "description": "Kéo code GitHub mới nhất & quét QA/QC M4.5"},
         {"command": "menu", "description": "Mở bảng nút bấm kiểm tra nhanh"},
     ]
@@ -490,6 +503,9 @@ class TelegramHealthBot:
             [
                 {"text": "🚨 Kiểm tra lỗi", "callback_data": "cmd_errors"},
                 {"text": "📊 Quota & Hàng đợi", "callback_data": "cmd_status"},
+            ],
+            [
+                {"text": "📈 Quét Trend & Cơ Hội SKU (/trend)", "callback_data": "cmd_trend"},
             ],
             [
                 {"text": "🔄 Cập nhật Code & Quét QA/QC (git pull)", "callback_data": "cmd_update"},
@@ -683,6 +699,26 @@ class TelegramHealthBot:
         ]
         return True, "\n".join(report_lines)
 
+    def build_trend_report(self) -> str:
+        """
+        Return the latest M_TREND report (respecting 15-minute cooldown cache so repeated taps
+        cost 0 Gemini/YouTube quota and respond instantly).
+        """
+        try:
+            from pipeline.m_trend_intelligence import StandaloneMTrendEngine, format_telegram_trend_report
+            from pipeline.schemas_m_trend import MTrendOpportunitiesOutput
+
+            eng = StandaloneMTrendEngine()
+            if eng.should_refresh_for_telegram(min_interval_minutes=15.0):
+                out = eng.run(use_llm=True)
+            else:
+                out = MTrendOpportunitiesOutput.model_validate_json(
+                    eng.output_path.read_text(encoding="utf-8")
+                )
+            return format_telegram_trend_report(out)
+        except Exception as exc:
+            return f"⚠️ Không thể chạy báo cáo M_TREND lúc này: {exc}"
+
     def _render_reply_for_action(self, action: str) -> str:
         act = (action or "").strip().lower()
         if act in ("/health", "cmd_health"):
@@ -693,6 +729,8 @@ class TelegramHealthBot:
             return self.inspector.build_errors_report()
         if act in ("/status", "cmd_status"):
             return self.inspector.build_status_quota_report()
+        if act in ("/trend", "cmd_trend"):
+            return self.build_trend_report()
         if act in ("/update", "cmd_update"):
             _, rep = self.execute_remote_update_and_qaqc(chat_id=None)
             return rep
@@ -785,7 +823,7 @@ class TelegramHealthBot:
                                 except OSError:
                                     pass
                                 os.execv(sys.executable, [sys.executable, "-m", "pipeline.telegram_health_bot", "--daemon"])
-                        elif cmd in ("/start", "/menu", "/health", "/modules", "/errors", "/status", "/help"):
+                        elif cmd in ("/start", "/menu", "/health", "/modules", "/errors", "/status", "/trend", "/help"):
                             reply = self._render_reply_for_action(cmd)
                             self.send_with_menu(allowed_chat, reply)
             except urllib.error.HTTPError as exc:
@@ -809,7 +847,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--print-report",
-        choices=["health", "modules", "errors", "status", "update"],
+        choices=["health", "modules", "errors", "status", "trend", "update"],
         default=None,
         help="Print a health report locally to stdout without starting getUpdates polling.",
     )

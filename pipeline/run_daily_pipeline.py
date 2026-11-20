@@ -38,6 +38,7 @@ from pipeline.m3_qaqc import M3QAQCEngine
 from pipeline.m4_5_video_qaqc import M45VideoQAQCEngine
 from pipeline.m4_video_producer import M4VideoProducerEngine
 from pipeline.m5_publisher import M5PublisherEngine
+from pipeline.m_trend_intelligence import StandaloneMTrendEngine, format_telegram_trend_report
 from pipeline.publish_packager import (
     DEFAULT_MANUAL_LINKS_PATH,
     DEFAULT_PUBLISH_MARKDOWN_PATH,
@@ -45,6 +46,7 @@ from pipeline.publish_packager import (
 )
 from pipeline.schemas_m1_5 import normalize_sku_key
 from pipeline.schemas_m3 import AuditedScriptItem
+from pipeline.schemas_m_trend import load_active_trend_opportunities
 from pipeline.shopee_browser_link_resolver import ShopeeAutoAffiliateResolver
 from pipeline.sku_registry import SKURegistryManager
 from pipeline.video_registry import VideoRegistryManager
@@ -311,10 +313,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=["status", "plan", "render", "video-qaqc", "pack", "publish", "shopee-auto", "gc", "auto"],
+        choices=["status", "trend", "plan", "render", "video-qaqc", "pack", "publish", "shopee-auto", "gc", "auto"],
         default="status",
         help=(
-            "Execution mode: 'status', 'plan' (M0->M3 once), 'render' (M4 1 video + M4.5 Vision QA/QC), "
+            "Execution mode: 'status', 'trend' (run M_TREND external trend & SKU intelligence), "
+            "'plan' (M0->M3 once), 'render' (M4 1 video + M4.5 Vision QA/QC), "
             "'video-qaqc' (run M4.5 AI Vision Video QA/QC on all unposted videos), "
             "'pack' (rebuild SEO + Official Shopee Mall publish pack & stage M5 payloads), "
             "'publish' (run Module M5 publisher with human pacing), 'shopee-auto' (re-verify Official Shopee Mall links), "
@@ -351,6 +354,12 @@ def main() -> int:
             stats = StorageGarbageCollector().sweep_all()
             print(f"[GC] Đã giải phóng {stats['total_freed_bytes'] / (1024 * 1024):.2f} MB dung lượng rác: {stats}", flush=True)
             print_pipeline_status()
+            return 0
+
+        if args.mode == "trend":
+            trend_eng = StandaloneMTrendEngine()
+            t_out = trend_eng.run(use_llm=True)
+            print(format_telegram_trend_report(t_out), flush=True)
             return 0
 
         if args.mode == "shopee-auto":
@@ -427,6 +436,28 @@ def main() -> int:
             print_pipeline_status()
             return 0
 
+        # 0. Fault-Isolated M_TREND tick (strict 6-hour minimum interval -> max 2 runs/day = 800 YouTube quota units!)
+        # Never allows an M_TREND error to interrupt M0..M5!
+        trend_eng: Optional[StandaloneMTrendEngine] = None
+        try:
+            trend_eng = StandaloneMTrendEngine()
+            if trend_eng.should_run_auto_tick(min_interval_hours=6.0):
+                print("[AUTO] 📈 Đến chu kỳ 6h của M_TREND -> Quét tín hiệu xu hướng & cơ hội SKU...", flush=True)
+                t_out = trend_eng.run(use_llm=True)
+                print(
+                    f"[AUTO M_TREND] status={t_out.status_reason_code} | active={t_out.total_active_opportunities} | "
+                    f"events_24h={t_out.raw_events_24h}",
+                    flush=True,
+                )
+                if t_out.status_reason_code in ("ERROR_COLLECTOR_FAILURE", "WARNING_LOGIC_ZERO_MATCH"):
+                    alert_k = f"diag_{t_out.status_reason_code}"
+                    if trend_eng.store.can_send_telegram_alert(alert_k, max_per_day=3):
+                        badge = "🔴 CẢNH BÁO LỖI M_TREND" if t_out.status_reason_code == "ERROR_COLLECTOR_FAILURE" else "🟡 CẢNH BÁO LOGIC M_TREND"
+                        TelegramNotifier().notify_pipeline_event(badge, [t_out.diagnostic_summary_vi])
+                        trend_eng.store.record_telegram_alert(alert_k)
+        except Exception as trend_exc:
+            print(f"[AUTO M_TREND] ⚠️ Bỏ qua lỗi M_TREND để bảo vệ luồng chính M0->M5: {trend_exc}", flush=True)
+
         # First sweep deleted/corrupted files & audit any unposted videos with M4.5 Vision QA/QC
         # so any bad video is immediately purged and its M4 quota/cooldown refunded before checking M4 queue
         StorageGarbageCollector().sweep_all()
@@ -461,6 +492,28 @@ def main() -> int:
                 )
                 run_planning_batch(topic_hint=args.hint)
                 ready_scripts, _ = get_ready_queued_scripts(vreg, sreg, qm)
+            elif s_rem > 0 and trend_eng is not None:
+                # Section 10.5 #5: If an unclaimed FAST_TRACK_TREND hits while Evergreen scripts are waiting,
+                # run a targeted 1-category M0->M3 batch (capped at 1 FAST_TRACK per 48h!) so it takes M4 slot #1.
+                existing_cats = {sc.category_id for sc in ready_scripts} | {u.category_id for u in unposted_now}
+                unclaimed_ft = [
+                    t
+                    for t in load_active_trend_opportunities()
+                    if t.priority_tier == "FAST_TRACK_TREND"
+                    and t.product_concept_id not in existing_cats
+                    and trend_eng.store.is_fast_track_48h_cap_available()
+                ]
+                if unclaimed_ft:
+                    ft = unclaimed_ft[0]
+                    print(
+                        f"[AUTO FAST_TRACK] 🔥 Phát hiện FAST_TRACK_TREND `{ft.product_concept_id}` ({ft.score_breakdown.effective_score_now_100}/100) "
+                        "-> Chạy M0->M3 mục tiêu (1 danh mục) để đưa vào vị trí #1 hàng đợi!",
+                        flush=True,
+                    )
+                    run_planning_batch(topic_hint=None, max_categories=1)
+                    trend_eng.store.record_fast_track_claimed(ft.opportunity_id, ft.product_concept_id)
+                    trend_eng.store.record_used_event_id(ft.canonical_event_id, ft.product_concept_id)
+                    ready_scripts, _ = get_ready_queued_scripts(vreg, sreg, qm)
 
             if ready_scripts:
                 run_single_render_step(ignore_2h_cooldown=args.ignore_2h_cooldown)

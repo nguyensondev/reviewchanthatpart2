@@ -49,6 +49,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_DIR = PROJECT_ROOT / "pipeline"
 
 STAGE_MODULES: Dict[str, str] = {
+    "M_TREND": "m_trend_intelligence",
     "M0": "m0_discovery",
     "M1": "m1_filter",
     "M1.5": "m1_5_combo_curator",

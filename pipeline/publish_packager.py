@@ -41,6 +41,7 @@ from pipeline.schemas_m5 import (
     PublishSKUAffiliateItem,
     PublishVideoPackageItem,
 )
+from pipeline.schemas_m_trend import load_active_trend_opportunities
 from pipeline.shared_utils import (
     AffiliateCSVRepository,
     sanitize_youtube_metadata_text,
@@ -136,6 +137,22 @@ CATEGORY_SHORT_KEYWORDS_VI: Dict[str, Tuple[str, List[str]]] = {
     "automatic_touchless_dish_soap_dispenser": (
         "Máy Tạo Bọt Xà Phòng Cảm Ứng Tự Động",
         ["#MayTaoBotXaPhong", "#DoGiaDungThongMinh", "#GocNhaBep"],
+    ),
+    "mini_clothes_dryer_dehumidifier": (
+        "Máy Hút Ẩm & Sấy Quần Áo Mini Chống Nồm",
+        ["#MayHutAmMini", "#DoGiaDungThongMinh", "#ChongNomAm"],
+    ),
+    "cordless_rechargeable_fan_powerbank": (
+        "Quạt Tích Điện Mini Pin Trâu",
+        ["#QuatTichDien", "#PhuKienCongNghe", "#SetupBanLamViec"],
+    ),
+    "hepa_air_purifier_mini": (
+        "Máy Lọc Không Khí Mini Màng Lọc HEPA",
+        ["#MayLocKhongKhi", "#DoGiaDungThongMinh", "#GocLamViec"],
+    ),
+    "mini_cordless_handheld_vacuum": (
+        "Máy Hút Bụi Cầm Tay Không Dây Mini",
+        ["#MayHutBuiMini", "#DoGiaDungThongMinh", "#VeSinhNhaCua"],
     ),
 }
 
@@ -706,9 +723,46 @@ class PublishPackager:
 
         yt_title, fb_title = self._build_dual_head_seo_titles(entry, resolved_skus)
         hashtags = self._build_focused_hashtags(entry, resolved_skus)
-        hashtag_line = " ".join(hashtags)
         chapters = self._build_chapter_timestamps(entry, script, m4_item, resolved_skus)
         yt_tags = self._build_youtube_backend_tags(entry, resolved_skus)
+
+        # Upgrade 2 (Section 8.9 Dynamic Trend SEO): Apply disciplined FAST_TRACK vs NORMAL SEO enrichment
+        trend_lead_sentence = ""
+        active_trends_map = {t.product_concept_id: t for t in load_active_trend_opportunities()}
+        trend_opp = active_trends_map.get(entry.category_id)
+        if trend_opp:
+            if trend_opp.priority_tier == "FAST_TRACK_TREND":
+                if trend_opp.seo_context_prefix_vi:
+                    prefix = trend_opp.seo_context_prefix_vi.strip().rstrip(":-")
+                    base_no_shorts = yt_title.replace("#Shorts", "").strip()
+                    candidate_title = sanitize_youtube_metadata_text(f"{prefix}: {base_no_shorts}", max_chars=87)
+                    yt_title = f"{candidate_title} #Shorts"
+                if trend_opp.need_pain_point_vi:
+                    trend_lead_sentence = f"🔥 {trend_opp.need_pain_point_vi.strip()}\n"
+                # Swap 1 of 3 category hashtags with 1 contextual hashtag (keep strict 6-hashtag cap!)
+                if trend_opp.seo_context_hashtag and trend_opp.seo_context_hashtag.startswith("#") and len(hashtags) >= 3:
+                    if trend_opp.seo_context_hashtag not in hashtags:
+                        hashtags[2] = trend_opp.seo_context_hashtag
+                extra_kws: List[str] = []
+                for kw in trend_opp.seo_trend_keywords_vi[:3]:
+                    extra_kws.append(kw)
+                    no_acc = _strip_accents(kw)
+                    if no_acc and no_acc != kw.lower():
+                        extra_kws.append(no_acc)
+                yt_tags = sanitize_youtube_tags(yt_tags + extra_kws, max_tags=15, max_total_chars=450)
+            else:
+                # NORMAL_TREND: keep Evergreen Buyer-Intent title; add light description context + 1-2 need tags
+                if trend_opp.need_pain_point_vi:
+                    trend_lead_sentence = f"💡 {trend_opp.need_pain_point_vi.strip()}\n"
+                extra_kws = []
+                for kw in trend_opp.seo_trend_keywords_vi[:2]:
+                    extra_kws.append(kw)
+                    no_acc = _strip_accents(kw)
+                    if no_acc and no_acc != kw.lower():
+                        extra_kws.append(no_acc)
+                yt_tags = sanitize_youtube_tags(yt_tags + extra_kws, max_tags=15, max_total_chars=450)
+
+        hashtag_line = " ".join(hashtags)
 
         # Build Pros, Specs, Caveats & Pinned Affiliate Lines
         pros_bullets: List[str] = []
@@ -756,9 +810,10 @@ class PublishPackager:
             max_chars=2000,
         )
 
-        # 2. Facebook Reels Checklist Caption (High-retention feed format — 100% status quo)
+        # 2. Facebook Reels Checklist Caption (High-retention feed format + optional Trend lead context)
         reels_caption = (
-            f"{fb_title}\n\n"
+            f"{fb_title}\n"
+            + (f"{trend_lead_sentence}\n" if trend_lead_sentence else "\n")
             + ("✅ Điểm đáng tiền qua kiểm chứng:\n" + "\n".join(pros_bullets[:3]) + "\n\n" if pros_bullets else "")
             + ("🔧 Thông số cốt lõi:\n" + "\n".join(spec_bullets) + "\n\n" if spec_bullets else "")
             + ("\n".join(caveat_bullets) + "\n\n" if caveat_bullets else "")
@@ -771,7 +826,7 @@ class PublishPackager:
         # 3. YouTube Shorts 4-Block Semantic SEO Description (strictly sanitized against '<' / '>' which cause HTTP 400!)
         search_keywords_footer = ", ".join(yt_tags[:10])
         raw_yt_description = (
-            f"{fb_title} — Đánh giá chi tiết thông số kỹ thuật, ưu điểm và nhược điểm thực tế trước khi mua.\n\n"
+            f"{trend_lead_sentence}{fb_title} — Đánh giá chi tiết thông số kỹ thuật, ưu điểm và nhược điểm thực tế trước khi mua.\n\n"
             f"{yt_pinned_comment}\n\n"
             + ("🔧 THÔNG SỐ & ĐIỂM NỔI BẬT:\n" + "\n".join(spec_bullets + pros_bullets[:2]) + "\n\n" if (spec_bullets or pros_bullets) else "")
             + ("⚠️ NHƯỢC ĐIỂM CẦN LƯU Ý TRƯỚC KHI MUA:\n" + "\n".join(caveat_bullets) + "\n\n" if caveat_bullets else "")
@@ -963,6 +1018,21 @@ class PublishPackager:
         m4_map = self._load_m4_rendered_map()
 
         rendered_entries = self.video_registry.get_rendered_unposted_videos()
+        # Soft Priority Ordering for M5 (Section 8.8):
+        #   1. Partially-published videos resuming platform #2 (`len(published_platforms) > 0`) ALWAYS go first.
+        #   2. Active non-expired `FAST_TRACK_TREND` videos go next.
+        #   3. Evergreen / `NORMAL_TREND` videos follow in existing order.
+        fast_track_cats = {
+            t.product_concept_id
+            for t in load_active_trend_opportunities()
+            if t.priority_tier == "FAST_TRACK_TREND"
+        }
+        rendered_entries.sort(
+            key=lambda e: (
+                0 if len(e.published_platforms) > 0 else 1,
+                0 if e.category_id in fast_track_cats else 1,
+            )
+        )
         packages: List[PublishVideoPackageItem] = []
         packages_by_id: Dict[str, PublishVideoPackageItem] = {}
 

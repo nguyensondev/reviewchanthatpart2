@@ -34,6 +34,8 @@ data/m4_production_output.json
 data/m4_5_video_qaqc_report.json
 data/m5_publish_report.json
 data/m5_publish_state.json
+data/m_trend_opportunities.json
+data/trend_intelligence.sqlite3*
 data/manual_affiliate_links.json
 data/short_links_registry.json
 data/sku_registry.json

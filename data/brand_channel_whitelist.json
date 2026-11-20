@@ -38,7 +38,11 @@
     "bluestone": ["BlueStone", "BlueStone Vietnam"],
     "simplus": ["Simplus", "Simplus Official"],
     "joyoung": ["Joyoung", "Joyoung Global"],
-    "midea": ["Midea", "Midea Official"]
+    "midea": ["Midea", "Midea Official"],
+    "lumias": ["Lumias", "Lumias Vietnam", "Lumias Official"],
+    "sharp": ["Sharp Vietnam", "Sharp Electronics", "Sharp Official"],
+    "levoit": ["Levoit", "Levoit Official", "Levoit Vietnam"],
+    "jisulife": ["JISULIFE", "JisuLife Official"]
   },
   "blocked_third_party_channel_keywords": [
     "techmall",

@@ -50,6 +50,7 @@ from pipeline.schemas_m0 import (
     MarketPriceRangeVND,
     YouTubeEvidenceClip,
 )
+from pipeline.schemas_m_trend import load_active_trend_opportunities
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -335,6 +336,67 @@ CATEGORY_ROTATION_TAXONOMY: List[Dict[str, Any]] = [
         "generic_youtube_queries_vi": [
             "review máy tạo bọt xà phòng cảm ứng",
             "đánh giá máy xịt nước rửa chén tự động",
+        ],
+    },
+    # --- HIGH-VELOCITY SEASONAL / WEATHER CONCEPTS (Synced with M_TREND) ---
+    {
+        "category_id": "mini_clothes_dryer_dehumidifier",
+        "domain": "KITCHEN_TECH",
+        "category_name_vi": "Máy hút ẩm & máy sấy quần áo mini chống nồm mốc",
+        "problem_solved_vi": "Hút ẩm phòng ngủ, tủ quần áo và sấy khô đồ nhanh chóng trong những ngày mưa nồm ẩm kéo dài",
+        "synonyms_norm": ["dehumidifier", "may_hut_am", "may_say_quan_ao_mini", "chong_nom_am"],
+        "generic_web_queries_vi": [
+            "máy hút ẩm mini cho phòng ngủ chống nồm ẩm loại nào tốt",
+            "so sánh máy sấy quần áo mini gia đình tiết kiệm điện",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy hút ẩm mini phòng ngủ",
+            "đánh giá máy sấy quần áo mini chống nồm",
+        ],
+    },
+    {
+        "category_id": "cordless_rechargeable_fan_powerbank",
+        "domain": "TECH_DESK",
+        "category_name_vi": "Quạt tích điện mini kiêm sạc dự phòng khi mất điện nắng nóng",
+        "problem_solved_vi": "Làm mát linh hoạt trên bàn làm việc và dự phòng thiết yếu khi mất điện mùa nắng nóng",
+        "synonyms_norm": ["rechargeable_fan", "quat_tich_dien", "quat_mini_de_ban", "quat_cam_tay"],
+        "generic_web_queries_vi": [
+            "quạt tích điện mini để bàn pin trâu chạy êm loại nào tốt",
+            "so sánh quạt cầm tay mini tốc độ cao pin lâu",
+        ],
+        "generic_youtube_queries_vi": [
+            "review quạt tích điện mini để bàn",
+            "đánh giá quạt mini cầm tay pin trâu",
+        ],
+    },
+    {
+        "category_id": "hepa_air_purifier_mini",
+        "domain": "TECH_DESK",
+        "category_name_vi": "Máy lọc không khí mini để bàn màng lọc HEPA khử bụi mịn",
+        "problem_solved_vi": "Lọc bụi mịn PM2.5, phấn hoa và mùi hôi trực tiếp tại bàn làm việc và phòng ngủ nhỏ",
+        "synonyms_norm": ["air_purifier", "may_loc_khong_khi_mini", "loc_bui_min_hepa"],
+        "generic_web_queries_vi": [
+            "máy lọc không khí mini để bàn màng lọc HEPA loại nào tốt",
+            "so sánh máy lọc không khí phòng ngủ nhỏ khử bụi mịn",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy lọc không khí mini để bàn",
+            "đánh giá máy lọc không khí phòng ngủ nhỏ",
+        ],
+    },
+    {
+        "category_id": "mini_cordless_handheld_vacuum",
+        "domain": "KITCHEN_TECH",
+        "category_name_vi": "Máy hút bụi cầm tay không dây mini cho sofa, giường & ô tô",
+        "problem_solved_vi": "Hút sạch vụn thức ăn, tóc rụng, lông thú cưng trên sofa, nệm và nội thất ô tô gọn nhẹ",
+        "synonyms_norm": ["handheld_vacuum", "may_hut_bui_cam_tay_mini", "may_hut_bui_o_to"],
+        "generic_web_queries_vi": [
+            "máy hút bụi cầm tay không dây mini lực hút mạnh loại nào tốt",
+            "so sánh máy hút bụi mini cho sofa giường và ô tô",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy hút bụi cầm tay không dây mini",
+            "đánh giá máy hút bụi mini lực hút mạnh",
         ],
     },
 ]
@@ -771,14 +833,43 @@ class M0AutonomousDiscoveryEngine:
         ]
         fresh_suggestions_str = "\n".join(suggested_fresh_lines)
 
-        hint_directive = (
-            f"GỢI Ý ƯU TIÊN TỪ NGƯỜI DÙNG: '{topic_hint}'. Hãy lập kế hoạch xoay quanh gợi ý này nhưng vẫn bảo đảm đa dạng chủ đề."
-            if topic_hint
-            else (
+        # Upgrade 2 (M_TREND Integration): Live-check active non-expired trends with Half-Life Time-Decay
+        live_trends = [
+            t
+            for t in load_active_trend_opportunities()
+            if self._resolve_canonical_category_id(t.product_concept_id) not in blocked_cat_ids
+            and t.re_entry_action not in ("SUPPRESSED_RECENTLY_COVERED", "DUPLICATE_EVENT_IGNORED")
+        ]
+        if live_trends and not topic_hint:
+            trend_lines = [
+                f"  * 🔥 [{t.priority_tier} | Điểm thực={t.score_breakdown.effective_score_now_100}/100 | {t.domain}] "
+                f"`{t.product_concept_id}` — {t.product_concept_name_vi} | Bối cảnh: {t.trend_title_vi} ({t.need_pain_point_vi})"
+                + (f" | LƯU Ý TÁI NHẬP: {t.re_entry_note_vi}" if t.re_entry_action != "NEW_OPPORTUNITY" else "")
+                for t in live_trends[:max(1, max_categories)]
+            ]
+            print(
+                f"[M0 TREND-DRIVEN] 📈 Phát hiện {len(live_trends)} cơ hội Trend đang hoạt động -> ưu tiên đưa lên đầu kế hoạch khám phá!",
+                flush=True,
+            )
+            hint_directive = (
+                "CƠ HỘI TREND ĐANG LÊN TỪ MODULE M_TREND (BẮT BUỘC ƯU TIÊN CHỌN TRƯỚC CÁC NHÓM NÀY):\n"
+                + "\n".join(trend_lines)
+                + "\n\nNếu cần thêm nhóm để đủ `max_categories`, chọn bổ sung từ danh sách Evergreen dưới đây:\n"
+                + fresh_suggestions_str
+            )
+        elif topic_hint:
+            hint_directive = (
+                f"GỢI Ý ƯU TIÊN TỪ NGƯỜI DÙNG: '{topic_hint}'. Hãy lập kế hoạch xoay quanh gợi ý này nhưng vẫn bảo đảm đa dạng chủ đề."
+            )
+        else:
+            print(
+                "[M0 EVERGREEN] 🌿 Không có cơ hội Trend mới khả dụng -> tự động chạy chế độ EVERGREEN_ROTATION.",
+                flush=True,
+            )
+            hint_directive = (
                 "ƯU TIÊN CHỌN TỪ DANH SÁCH NHÓM SẢN PHẨM MỚI CHƯA LẶP LẠI DƯỚI ĐÂY (hoặc nhóm mới hoàn toàn chưa có trong danh sách khóa):\n"
                 f"{fresh_suggestions_str}"
             )
-        )
 
         domain_balance_rule = (
             f"Chủ đề ưu tiên cân bằng kỳ này: `{domain}`, NHƯNG VÌ `max_categories = {max_categories} >= 2`, BẮT BUỘC PHẢI PHÂN BỔ HÀI HÒA GIỮA CẢ HAI CHỦ ĐỀ GỐC:\n"

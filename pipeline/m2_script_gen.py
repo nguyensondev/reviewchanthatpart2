@@ -32,6 +32,7 @@ from pipeline.llm_client import FreeTierGeminiClient
 from pipeline.schemas_m0 import AffiliateListingMatch, DomainId, YouTubeEvidenceClip
 from pipeline.schemas_m1 import EvaluatedCandidateSKU, M1QualifiedSKUsOutput, QualifiedCategoryResult, ScoreBreakdown100
 from pipeline.schemas_m1_5 import M15ComboCuratorOutput
+from pipeline.schemas_m_trend import load_active_trend_opportunities
 from pipeline.shared_utils import check_vietnamese_diacritics, enforce_short_hook_title
 from pipeline.sku_registry import SKURegistryManager
 
@@ -294,11 +295,37 @@ class M2ScriptGeneratorEngine:
                 "   - 1 kịch bản ghép đa SKU (`DUAL_TIER_COMPARISON` hoặc `COMBO_WORKFLOW_SYNERGY`)."
             )
 
+        # Upgrade 2 (M_TREND Hook Context): Inject live non-expired trend context if any M1 category matches
+        active_trends_by_cat = {
+            t.product_concept_id: t for t in load_active_trend_opportunities()
+        }
+        trend_context_lines: List[str] = []
+        for cat in m1_data.qualified_categories:
+            t_opp = active_trends_by_cat.get(cat.category_id)
+            if t_opp:
+                trend_context_lines.append(
+                    f"- Nhóm `{cat.category_id}` đang có Trend [{t_opp.priority_tier} | Điểm={t_opp.score_breakdown.effective_score_now_100}/100]: "
+                    f"Chủ đề='{t_opp.trend_title_vi}' | Nỗi đau='{t_opp.need_pain_point_vi}' | "
+                    f"Gợi ý mở màn Hook 3s đầu: \"{t_opp.trend_hook_angle_vi}\""
+                    + (
+                        f" | ⚠️ TÁI NHẬP TREND MỚI: {t_opp.re_entry_note_vi}"
+                        if t_opp.re_entry_action != "NEW_OPPORTUNITY"
+                        else ""
+                    )
+                )
+        trend_context_block = (
+            "\nNGỮ CẢNH TREND THỜI SỰ TỪ MODULE M_TREND (LỒNG GHÉP TỰ NHIÊN VÀO HOOK BEAT 1, KHÔNG GHI NGÀY THÁNG CỨNG):\n"
+            + "\n".join(trend_context_lines)
+            + "\n"
+            if trend_context_lines
+            else ""
+        )
+
         return f"""
 Bối cảnh ngách từ M1:
 - Lĩnh vực: `{m1_data.domain}` — {m1_data.sub_niche_name_vi}
 - Nỗi đau người dùng: {m1_data.problem_context_vi}
-
+{trend_context_block}
 Dữ liệu các sản phẩm đã được M1 thẩm định:
 
 {chr(10).join(category_blocks)}
