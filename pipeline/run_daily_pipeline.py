@@ -362,7 +362,7 @@ def main() -> int:
             return 0
 
         if args.mode == "video-qaqc":
-            M45VideoQAQCEngine().run(force_reaudit=True, purge_on_reject=True)
+            M45VideoQAQCEngine().run(force_reaudit=False, purge_on_reject=True)
             PublishPackager().build_publish_pack()
             M5PublisherEngine().run(live_upload=False)
             StorageGarbageCollector().sweep_all()

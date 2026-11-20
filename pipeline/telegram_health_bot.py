@@ -477,6 +477,7 @@ class TelegramHealthBot:
         {"command": "modules", "description": "Kiểm tra tình trạng từng module M0–M5"},
         {"command": "errors", "description": "Kiểm tra lỗi gần đây & cảnh báo"},
         {"command": "status", "description": "Xem quota hôm nay & hàng đợi video"},
+        {"command": "update", "description": "Kéo code GitHub mới nhất & quét QA/QC M4.5"},
         {"command": "menu", "description": "Mở bảng nút bấm kiểm tra nhanh"},
     ]
 
@@ -489,6 +490,9 @@ class TelegramHealthBot:
             [
                 {"text": "🚨 Kiểm tra lỗi", "callback_data": "cmd_errors"},
                 {"text": "📊 Quota & Hàng đợi", "callback_data": "cmd_status"},
+            ],
+            [
+                {"text": "🔄 Cập nhật Code & Quét QA/QC (git pull)", "callback_data": "cmd_update"},
             ],
         ]
     }
@@ -544,6 +548,141 @@ class TelegramHealthBot:
         except Exception:
             pass
 
+    def execute_remote_update_and_qaqc(self, chat_id: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Safely execute `git pull origin main` + `run_daily_pipeline --mode video-qaqc` from Telegram:
+          1. Refuses if `run_daily_pipeline` is currently running (`_check_pipeline_running_now()`).
+          2. Pulls latest code from `origin/main`.
+          3. Runs `--mode video-qaqc` (M4.5 Vision QA/QC + PublishPackager + M5 Stage + StorageGC).
+          4. Collects fresh `status` and `modules` reports from disk using the newly pulled code.
+          Returns `(should_reload_daemon, telegram_report_text)`.
+        """
+        host = platform.node().split(".")[0] or "Mac"
+        arch = platform.machine()
+        mac_ver = platform.mac_ver()[0] or "N/A"
+
+        if _check_pipeline_running_now():
+            return (
+                False,
+                "⏳ PIPELINE ĐANG BẬN XỬ LÝ (RENDER / UPLOAD)\n\n"
+                f"💻 Máy: {host} ({arch} / macOS {mac_ver})\n"
+                "• Hiện đang có tiến trình `run_daily_pipeline` đang chạy dở.\n"
+                "• Để bảo vệ file video đang dựng/đăng, vui lòng bấm lại nút '🔄 Cập nhật Code' sau 30–60 giây!",
+            )
+
+        if chat_id:
+            try:
+                self._api_call(
+                    "sendMessage",
+                    {
+                        "chat_id": chat_id,
+                        "text": (
+                            f"⏳ [{host}] Đang kéo code mới nhất từ GitHub (`git pull origin main`) "
+                            "và chạy kiểm định hình ảnh M4.5... Vui lòng chờ 5–15 giây."
+                        ),
+                        "disable_web_page_preview": True,
+                    },
+                    timeout=10.0,
+                )
+            except Exception:
+                pass
+
+        def _git_cmd(args_list: List[str], timeout_s: float = 45.0) -> Tuple[int, str]:
+            try:
+                cp = subprocess.run(
+                    ["git", *args_list],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                )
+                out = ((cp.stdout or "") + "\n" + (cp.stderr or "")).strip()
+                return cp.returncode, out
+            except Exception as exc:
+                return 1, str(exc)
+
+        _, old_sha = _git_cmd(["rev-parse", "--short", "HEAD"], timeout_s=10.0)
+        pull_rc, pull_out = _git_cmd(["pull", "origin", "main"], timeout_s=45.0)
+        _, new_sha = _git_cmd(["rev-parse", "--short", "HEAD"], timeout_s=10.0)
+        _, commit_subject = _git_cmd(["log", "-1", "--pretty=%s"], timeout_s=10.0)
+
+        qaqc_rc = 0
+        qaqc_tail = ""
+        try:
+            cp_qa = subprocess.run(
+                [sys.executable, "-m", "pipeline.run_daily_pipeline", "--mode", "video-qaqc"],
+                cwd=str(PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=240.0,
+            )
+            qaqc_rc = cp_qa.returncode
+            raw_qa = ((cp_qa.stdout or "") + "\n" + (cp_qa.stderr or "")).strip()
+            qa_lines = [
+                ln.strip()
+                for ln in raw_qa.splitlines()
+                if any(tag in ln for tag in ("[M4.5]", "[STEP A", "[M5]", "[GC"))
+            ]
+            qaqc_tail = "\n".join(qa_lines[-6:]) if qa_lines else "Hoàn tất quét M4.5 & làm mới gói đăng bài."
+        except Exception as exc:
+            qaqc_rc = 1
+            qaqc_tail = f"Lỗi khi chạy video-qaqc: {exc}"
+
+        # Render fresh status & modules reports using subprocess so newly pulled disk code is used
+        fresh_status = ""
+        fresh_modules = ""
+        try:
+            cp_st = subprocess.run(
+                [sys.executable, "-m", "pipeline.telegram_health_bot", "--print-report", "status"],
+                cwd=str(PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=25.0,
+            )
+            if cp_st.returncode == 0 and cp_st.stdout.strip():
+                fresh_status = cp_st.stdout.strip()
+        except Exception:
+            pass
+        try:
+            cp_md = subprocess.run(
+                [sys.executable, "-m", "pipeline.telegram_health_bot", "--print-report", "modules"],
+                cwd=str(PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=25.0,
+            )
+            if cp_md.returncode == 0 and cp_md.stdout.strip():
+                fresh_modules = cp_md.stdout.strip()
+        except Exception:
+            pass
+
+        if not fresh_status:
+            fresh_status = self.inspector.build_status_quota_report()
+        if not fresh_modules:
+            fresh_modules = self.inspector.build_modules_health_report()
+
+        if pull_rc != 0:
+            header = "⚠️ CẬP NHẬT CODE CÓ CẢNH BÁO GIT"
+        elif old_sha != new_sha:
+            header = f"✅ ĐÃ CẬP NHẬT CODE MỚI ({old_sha} → {new_sha})"
+        else:
+            header = f"✅ ĐÃ Ở BẢN MỚI NHẤT ({new_sha}) & QUÉT M4.5 XONG"
+
+        report_lines = [
+            header,
+            f"💻 Máy: {host} ({arch} / macOS {mac_ver})",
+            f"📌 Commit hiện tại: {new_sha} — {commit_subject[:110]}",
+            f"📥 Git pull: {'Thành công' if pull_rc == 0 else f'Lỗi (rc={pull_rc})'}: {(pull_out.splitlines()[-1] if pull_out else 'OK')[:120]}",
+            f"🛡️ Quét M4.5 & Gói đăng bài: {'🟢 OK' if qaqc_rc == 0 else f'🟡 rc={qaqc_rc}'}",
+            qaqc_tail,
+            "🔄 Telegram Bot Daemon: Tự động nạp lại code mới ngay lập tức.",
+            "",
+            fresh_status,
+            "",
+            fresh_modules,
+        ]
+        return True, "\n".join(report_lines)
+
     def _render_reply_for_action(self, action: str) -> str:
         act = (action or "").strip().lower()
         if act in ("/health", "cmd_health"):
@@ -554,8 +693,11 @@ class TelegramHealthBot:
             return self.inspector.build_errors_report()
         if act in ("/status", "cmd_status"):
             return self.inspector.build_status_quota_report()
+        if act in ("/update", "cmd_update"):
+            _, rep = self.execute_remote_update_and_qaqc(chat_id=None)
+            return rep
         return (
-            "🤖 BẢNG KIỂM TRA SỨC KHỎE HỆ THỐNG\n"
+            "🤖 BẢNG ĐIỀU KHIỂN & SỨC KHỎE HỆ THỐNG\n"
             "Chọn một nút bên dưới hoặc dùng các lệnh ở nút Menu:"
         )
 
@@ -608,10 +750,22 @@ class TelegramHealthBot:
                     cb = upd.get("callback_query")
                     if isinstance(cb, dict):
                         cb_chat = str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
+                        cb_data = str(cb.get("data") or "").strip().lower()
                         self._answer_callback(str(cb.get("id") or ""))
                         if cb_chat == allowed_chat:
-                            reply = self._render_reply_for_action(str(cb.get("data") or ""))
-                            self.send_with_menu(allowed_chat, reply)
+                            if cb_data == "cmd_update":
+                                should_reload, reply = self.execute_remote_update_and_qaqc(chat_id=allowed_chat)
+                                self.send_with_menu(allowed_chat, reply)
+                                if should_reload:
+                                    print("[TELEGRAM BOT] Hot-reloading daemon after /update...", flush=True)
+                                    try:
+                                        os.close(lock_fd)
+                                    except OSError:
+                                        pass
+                                    os.execv(sys.executable, [sys.executable, "-m", "pipeline.telegram_health_bot", "--daemon"])
+                            else:
+                                reply = self._render_reply_for_action(cb_data)
+                                self.send_with_menu(allowed_chat, reply)
                         continue
 
                     msg = upd.get("message")
@@ -621,7 +775,17 @@ class TelegramHealthBot:
                         if msg_chat != allowed_chat or not text:
                             continue
                         cmd = text.split()[0].split("@")[0].lower()
-                        if cmd in ("/start", "/menu", "/health", "/modules", "/errors", "/status", "/help"):
+                        if cmd == "/update":
+                            should_reload, reply = self.execute_remote_update_and_qaqc(chat_id=allowed_chat)
+                            self.send_with_menu(allowed_chat, reply)
+                            if should_reload:
+                                print("[TELEGRAM BOT] Hot-reloading daemon after /update...", flush=True)
+                                try:
+                                    os.close(lock_fd)
+                                except OSError:
+                                    pass
+                                os.execv(sys.executable, [sys.executable, "-m", "pipeline.telegram_health_bot", "--daemon"])
+                        elif cmd in ("/start", "/menu", "/health", "/modules", "/errors", "/status", "/help"):
                             reply = self._render_reply_for_action(cmd)
                             self.send_with_menu(allowed_chat, reply)
             except urllib.error.HTTPError as exc:
@@ -645,7 +809,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--print-report",
-        choices=["health", "modules", "errors", "status"],
+        choices=["health", "modules", "errors", "status", "update"],
         default=None,
         help="Print a health report locally to stdout without starting getUpdates polling.",
     )
