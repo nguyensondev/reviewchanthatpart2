@@ -569,7 +569,7 @@ class PublishPackager:
                 brand_model_tags.append(f"#{b_clean}{m_clean}")
         brand_model_tags = list(dict.fromkeys(brand_model_tags))[:2]
 
-        combined = list(dict.fromkeys(niche_tags[:3] + brand_model_tags + ["#ReviewChanThuc"]))
+        combined = list(dict.fromkeys(niche_tags[:3] + brand_model_tags[:1] + ["#ReviewChanThuc", "#AIReview"]))
         return combined[:6]
 
     def _build_chapter_timestamps(
@@ -661,9 +661,9 @@ class PublishPackager:
                 raw_tags.append(_strip_accents(prod_short))
 
         if entry.domain == "TECH_DESK":
-            raw_tags.extend(["setup bàn làm việc", "goc lam viec", "phụ kiện bàn làm việc"])
+            raw_tags.extend(["setup bàn làm việc", "goc lam viec", "phụ kiện bàn làm việc", "ai review"])
         else:
-            raw_tags.extend(["đồ gia dụng nhà bếp", "do bep thong minh", "review đồ gia dụng"])
+            raw_tags.extend(["đồ gia dụng nhà bếp", "do bep thong minh", "review đồ gia dụng", "ai review"])
 
         return sanitize_youtube_tags(raw_tags, max_weighted_bytes=350, max_count=15)
 
@@ -759,7 +759,7 @@ class PublishPackager:
                     no_acc = _strip_accents(kw)
                     if no_acc and no_acc != kw.lower():
                         extra_kws.append(no_acc)
-                yt_tags = sanitize_youtube_tags(yt_tags + extra_kws, max_tags=15, max_total_chars=450)
+                yt_tags = sanitize_youtube_tags(yt_tags + extra_kws, max_weighted_bytes=350, max_count=15)
             else:
                 # NORMAL_TREND: keep Evergreen Buyer-Intent title; add light description context + 1-2 need tags
                 if trend_opp.need_pain_point_vi:
@@ -770,7 +770,7 @@ class PublishPackager:
                     no_acc = _strip_accents(kw)
                     if no_acc and no_acc != kw.lower():
                         extra_kws.append(no_acc)
-                yt_tags = sanitize_youtube_tags(yt_tags + extra_kws, max_tags=15, max_total_chars=450)
+                yt_tags = sanitize_youtube_tags(yt_tags + extra_kws, max_weighted_bytes=350, max_count=15)
 
         hashtag_line = " ".join(hashtags)
 
@@ -820,7 +820,12 @@ class PublishPackager:
             max_chars=2000,
         )
 
-        # 2. Facebook Reels Checklist Caption (High-retention feed format + optional Trend lead context)
+        ai_disclosure_line = (
+            "🤖 Minh bạch nội dung: Video có sử dụng giọng đọc và biên tập hỗ trợ bởi AI "
+            "(thông số đối chiếu trực tiếp từ nguồn chính hãng)."
+        )
+
+        # 2. Facebook Reels Checklist Caption (High-retention feed format + optional Trend lead context + AI disclosure)
         reels_caption = (
             f"{fb_title}\n"
             + (f"{trend_lead_sentence}\n" if trend_lead_sentence else "\n")
@@ -829,7 +834,7 @@ class PublishPackager:
             + ("\n".join(caveat_bullets) + "\n\n" if caveat_bullets else "")
             + "🛒 Link gian hàng Shopee Mall Chính Hãng mình để ngay ở Bình luận đầu tiên bên dưới (hoặc bấm trực tiếp tại đây):\n"
             + "\n".join(pinned_lines)
-            + "\n\n"
+            + f"\n\n{ai_disclosure_line}\n\n"
             + hashtag_line
         )
 
@@ -841,6 +846,7 @@ class PublishPackager:
             + ("🔧 THÔNG SỐ & ĐIỂM NỔI BẬT:\n" + "\n".join(spec_bullets + pros_bullets[:2]) + "\n\n" if (spec_bullets or pros_bullets) else "")
             + ("⚠️ NHƯỢC ĐIỂM CẦN LƯU Ý TRƯỚC KHI MUA:\n" + "\n".join(caveat_bullets) + "\n\n" if caveat_bullets else "")
             + ("⏱️ MỐC THỜI GIAN TRONG VIDEO (TIMESTAMPS):\n" + "\n".join(chapters) + "\n\n" if chapters else "")
+            + f"{ai_disclosure_line}\n\n"
             + f"🔍 Từ khóa tìm kiếm liên quan: {search_keywords_footer}\n\n"
             + f"{hashtag_line} #Shorts"
         )

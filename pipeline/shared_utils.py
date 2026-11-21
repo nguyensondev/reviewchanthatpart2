@@ -176,15 +176,22 @@ def check_vietnamese_diacritics(
 
 def normalize_vietnamese_for_tts(text: str) -> str:
     """
-    Convert compact visual symbols/prices/units inside spoken `tts_voiceover_vi` into natural
-    Vietnamese words so TTS engines never misread `1.850.000đ`, `~420k`, `57°`, `0.1g`, `USB-C`.
+    Convert compact visual symbols, prices, technical units, and model codes inside spoken
+    `tts_voiceover_vi` into natural Vietnamese words so TTS engines read with human-like clarity
+    instead of spelling letter-by-letter or misreading `12.000Pa`, `4000mAh`, `CRI Ra>95`, `A3_Lite`.
     """
     s = " ".join((text or "").strip().split())
     if not s:
         return s
 
+    # Clean markdown / stray formatting symbols that make TTS stall
+    s = s.replace("*", "").replace("`", "").replace("|", ", ")
     # Remove tilde '~' before numbers so TTS doesn't read "ngã"
     s = re.sub(r"~\s*(?=\d)", "", s)
+    # Replace underscores in model codes like A3_Lite -> A3 Lite
+    s = re.sub(r"(?<=[A-Za-z0-9])_(?=[A-Za-z0-9])", " ", s)
+    # Replace em-dash / en-dash between phrases with comma pause
+    s = re.sub(r"\s+[—–]\s+", ", ", s)
 
     # Exact formatted VND prices like 1.850.000đ or 420.000đ or 89.000đ
     def _repl_full_vnd(m: re.Match[str]) -> str:
@@ -218,17 +225,77 @@ def normalize_vietnamese_for_tts(text: str) -> str:
     # Shorthand thousands like 420k, 89k
     s = re.sub(r"\b(\d+)\s*k\b", r"\1 nghìn", s, flags=re.IGNORECASE)
 
-    # Decimals + units like 0.1g or 0,1g
+    # Round thousands with tech units: 12.000Pa, 15000Pa, 4.000mAh, 10000mAh, 4000 DPI
+    def _repl_thousand_unit(unit_vi: str):
+        def _fn(m: re.Match[str]) -> str:
+            digits = re.sub(r"[^\d]", "", m.group(1))
+            if not digits:
+                return m.group(0)
+            val = int(digits)
+            if val >= 1000 and val % 1000 == 0:
+                return f"{val // 1000} nghìn {unit_vi}"
+            if val >= 1000 and val % 100 == 0:
+                return f"{val // 1000} nghìn {(val % 1000) // 100} trăm {unit_vi}"
+            return f"{val} {unit_vi}"
+        return _fn
+
+    s = re.sub(r"\b(\d{1,2}(?:[.,]\d{3})|\d{4,5})\s*pa\b", _repl_thousand_unit("pát can"), s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d{1,2}(?:[.,]\d{3})|\d{4,5})\s*mah\b", _repl_thousand_unit("mi li am pe giờ"), s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d{1,2}(?:[.,]\d{3})|\d{4,5})\s*dpi\b", _repl_thousand_unit("đi pi ai"), s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d{1,2}(?:[.,]\d{3})|\d{4,5})\s*rpm\b", _repl_thousand_unit("vòng mỗi phút"), s, flags=re.IGNORECASE)
+
+    # CRI / Ra optical color rendering index
+    s = re.sub(r"\bCRI\s*(?:Ra\s*)?(?:>=|>)\s*(\d+)\b", r"chỉ số hoàn màu trên \1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bRa\s*(?:>=|>)\s*(\d+)\b", r"chỉ số hoàn màu trên \1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bCRI\s*(?:Ra\s*)?(\d+)\b", r"chỉ số hoàn màu \1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bRa\s*(\d+)\b", r"chỉ số hoàn màu \1", s, flags=re.IGNORECASE)
+
+    # IP water/dust ratings & PM2.5
+    s = re.sub(r"\bIPX(\d)\b", r"I P X \1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bIP(\d{2})\b", r"I P \1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bPM\s*2[.,]5\b", "P M 2 phẩy 5", s, flags=re.IGNORECASE)
+
+    # Slash-based rate units like vòng/phút, lần/ngày, ml/giờ
+    s = re.sub(r"\bvòng\s*/\s*phút\b", "vòng mỗi phút", s, flags=re.IGNORECASE)
+    s = re.sub(r"\blần\s*/\s*ngày\b", "lần mỗi ngày", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bml\s*/\s*giờ\b", "mi li lít mỗi giờ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bl\s*/\s*ngày\b", "lít mỗi ngày", s, flags=re.IGNORECASE)
+
+    # Decimals + units like 0.1g, 1.5kg, 1.2L, 2.4GHz, 5.5W, 99.9%
     s = re.sub(r"\b(\d+)[.,](\d+)\s*g\b", r"\1 phẩy \2 gam", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)[.,](\d+)\s*kg\b", r"\1 phẩy \2 ký", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*L\b", r"\1 phẩy \2 lít", s)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*m\b", r"\1 phẩy \2 mét", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*ghz\b", r"\1 phẩy \2 ghi ga héc", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*kpa\b", r"\1 phẩy \2 ki lô pát can", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*db\b", r"\1 phẩy \2 đề xi ben", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*w\b", r"\1 phẩy \2 oát", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*v\b", r"\1 phẩy \2 vôn", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*a\b", r"\1 phẩy \2 am pe", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)[.,](\d+)\s*%", r"\1 phẩy \2 phần trăm", s)
 
-    # Ranges + units like 3-6kg or 60-100°C
+    # Ranges + units like 3-6kg, 60-100°C, 30-45dB, 2-3 giờ
     s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*kg\b", r"\1 đến \2 ký", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*°\s*c\b", r"\1 đến \2 độ C", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*db\b", r"\1 đến \2 đề xi ben", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*w\b", r"\1 đến \2 oát", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*%", r"\1 đến \2 phần trăm", s)
+    s = re.sub(
+        r"\b(\d+)\s*[-–]\s*(\d+)\s*(giờ|phút|giây|ngày|tháng|năm|mức|cấp|chế độ|tốc độ)\b",
+        r"\1 đến \2 \3",
+        s,
+        flags=re.IGNORECASE,
+    )
 
     # Dimensions like 125x142mm
     s = re.sub(r"\b(\d+)\s*[x×]\s*(\d+)\s*mm\b", r"\1 nhân \2 mi li mét", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)\s*[x×]\s*(\d+)\s*cm\b", r"\1 nhân \2 xen ti mét", s, flags=re.IGNORECASE)
+
+    # Comparison symbols before numbers
+    s = re.sub(r">=\s*(\d)", r"từ \1", s)
+    s = re.sub(r"<=\s*(\d)", r"tối đa \1", s)
+    s = re.sub(r">\s*(\d)", r"trên \1", s)
+    s = re.sub(r"<\s*(\d)", r"dưới \1", s)
 
     # Standalone units attached to numbers
     s = re.sub(r"(\d+)\s*°\s*c\b", r"\1 độ C", s, flags=re.IGNORECASE)
@@ -238,12 +305,78 @@ def normalize_vietnamese_for_tts(text: str) -> str:
     s = re.sub(r"\b(\d+)\s*cm\b", r"\1 xen ti mét", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)\s*kg\b", r"\1 ký", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)\s*g\b", r"\1 gam", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*kpa\b", r"\1 ki lô pát can", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*pa\b", r"\1 pát can", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*mah\b", r"\1 mi li am pe giờ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*wh\b", r"\1 oát giờ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*db\b", r"\1 đề xi ben", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*dpi\b", r"\1 đi pi ai", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*rpm\b", r"\1 vòng mỗi phút", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*ghz\b", r"\1 ghi ga héc", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*mhz\b", r"\1 mê ga héc", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*khz\b", r"\1 ki lô héc", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*hz\b", r"\1 héc", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)\s*w\b", r"\1 oát", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*v\b", r"\1 vôn", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*L\b", r"\1 lít", s)
+    s = re.sub(r"(\d+)\s*%", r"\1 phần trăm", s)
 
-    # Smooth tech connectors for Vietnamese TTS
+    # Smooth tech connectors & common acronyms for Vietnamese TTS
     s = re.sub(r"\bUSB[-\s]*C\b", "USB Type C", s, flags=re.IGNORECASE)
     s = re.sub(r"\bType[-\s]*C\b", "Type C", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bHEPA\b", "Hê pa", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bGaN\b", "Gan", s)
+    s = re.sub(r"\b4K\b", "4 ca", s)
+    s = re.sub(r"\b2K\b", "2 ca", s)
+    s = re.sub(r"\bi[-\s]*wok\s*2\b", "ai uốc 2", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bLite\b", "Lai", s)
+
+    # Hyphenated model codes (KD-192 -> KD 192, SN-88 -> SN 88, VS-B01V1 -> VS B01V1)
+    s = re.sub(r"\b([A-Za-z]{1,4})-([A-Za-z0-9]{2,8})\b", r"\1 \2", s)
+
+    # Slash between words like bật/tắt, khô/ướt, nóng/lạnh -> " hoặc "
+    s = re.sub(r"(?<=[A-Za-zÀ-ỹ])\s*/\s*(?=[A-Za-zÀ-ỹ])", " hoặc ", s)
+
+    # Smooth parentheses into natural pauses
+    s = re.sub(r"\s*\(\s*", ", ", s)
+    s = re.sub(r"\s*\)\s*", ", ", s)
+    s = re.sub(r",\s*,+", ", ", s)
+    s = re.sub(r",\s*([.!?])", r"\1", s)
     return " ".join(s.split())
+
+
+def audit_tts_readability(text: str) -> List[str]:
+    """
+    Deterministic TTS naturalness & rhythm audit for M3 QA/QC.
+    Returns a list of Vietnamese issue descriptions (empty list = clean, human-like TTS flow).
+    """
+    s = " ".join((text or "").strip().split())
+    if not s:
+        return ["Lời thoại trống."]
+
+    issues: List[str] = []
+    # 1. Raw underscores in spoken voiceover (e.g., A3_Lite)
+    if "_" in s:
+        issues.append("Chứa dấu gạch dưới '_' trong lời thoại TTS (dễ đọc lỗi mã sản phẩm).")
+
+    # 2. Ugly long factory SKU codes read letter-by-letter (e.g., VS-B01V1, YLTD003, CKS321GRN)
+    ugly_codes = re.findall(r"\b(?:[A-Z]{2,}-[A-Z0-9]{4,}|[A-Z]{4,}\d{2,}[A-Z0-9]*)\b", s)
+    if ugly_codes:
+        issues.append(
+            f"Chứa mã linh kiện/xuất xưởng dài khó đọc tự nhiên ({', '.join(ugly_codes[:3])}); "
+            "nên đọc gọn bằng tên thương hiệu + dòng máy thân thiện."
+        )
+
+    # 3. Unpunctuated run-on segments (> 24 words without any pause . ! ? , ; :)
+    segments = [seg.strip() for seg in re.split(r"[.!?,;:]", s) if seg.strip()]
+    longest_seg_words = max((len(seg.split()) for seg in segments), default=0)
+    if longest_seg_words > 24:
+        issues.append(
+            f"Có đoạn dài {longest_seg_words} từ liên tiếp không có dấu ngắt câu (. , ? !), "
+            "khiến TTS bị hụt hơi hoặc cắt nhịp giữa chừng làm mất nghĩa."
+        )
+
+    return issues
 
 
 def sanitize_youtube_metadata_text(text: str, max_chars: int = 4800) -> str:

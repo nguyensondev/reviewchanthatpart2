@@ -26,6 +26,7 @@ from pipeline.core_resilience import atomic_write_text
 from pipeline.daily_quota import DailyQuotaManager, MAX_FINAL_SCRIPTS_PER_DAY
 from pipeline.llm_client import FreeTierGeminiClient
 from pipeline.shared_utils import (
+    audit_tts_readability,
     check_vietnamese_diacritics,
     enforce_short_hook_title,
     normalize_vietnamese_for_tts,
@@ -427,6 +428,23 @@ class M3QAQCEngine:
                     )
                 )
 
+            tts_read_issues = audit_tts_readability(beat.voiceover_vi)
+            for t_issue in tts_read_issues:
+                is_runon = "không có dấu ngắt câu" in t_issue
+                issues.append(
+                    QAQCIssueItem(
+                        issue_category="PACING_OR_LENGTH",
+                        severity="NEEDS_M2_REWRITE" if is_runon else "WARNING_AUTO_PATCHED",
+                        beat_index=beat.beat_index,
+                        description_vi=f"Phân cảnh #{beat.beat_index} — Lỗi nhịp đọc TTS: {t_issue}",
+                        resolution_applied_vi=(
+                            "Đánh FAILED_NEEDS_REWRITE yêu cầu M2 tách thành 2 câu ngắn (10-16 từ/câu) có dấu chấm ngắt nhịp rõ nghĩa."
+                            if is_runon
+                            else "Tầng 3 sẽ chuẩn hóa lại cách đọc mã sản phẩm/thông số trong `tts_voiceover_vi` cho tự nhiên như người thật."
+                        ),
+                    )
+                )
+
             if beat.source_youtube_clip is None and not has_critical:
                 issues.append(
                     QAQCIssueItem(
@@ -510,11 +528,11 @@ class M3QAQCEngine:
             "4. KIỂM ĐỊNH HOOK MỞ BÀI & LỜI DẪN CHUYỂN Ý (`WEAK_HOOK_OR_TRANSITION`): Mở bài (Beat 1) phải chạm trúng tình huống thực tế cuốn hút; đầu các Beat 2, 3, 4, 5 phải có lời dẫn nối mạch mượt mà; câu văn không được cụt ý hay rời rạc. Nếu mở bài nhạt hoặc thiếu lời dẫn chuyển ý, gắn `WEAK_HOOK_OR_TRANSITION` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `natural_tone_and_logic_score <= 15.0` và đặt `needs_m2_rewrite = true`.\n"
             "5. CHỐNG GƯỢNG ÉP COMBO (`FORCED_COMBO_LOGIC`): Nếu hai SKU cùng công năng khác cỡ mà ép mua cả hai thay vì so sánh chọn 1, gắn `FORCED_COMBO_LOGIC` (`severity=\"NEEDS_M2_REWRITE\"`).\n"
             "6. NGƯỠNG ĐẬU KHẮT KHE (`>= 82.0/100` & `needs_m2_rewrite = false`): Chỉ khi kịch bản đã thực sự cuốn hút, đầy đủ highlight của SKU, lời dẫn mượt mà, đúng sự thật 100% và có nhược điểm công tâm mới được đặt `needs_m2_rewrite = false` và tổng điểm `>= 82.0`. Nếu `needs_m2_rewrite = true`, BẮT BUỘC viết `rewrite_instructions_for_m2_vi` thật chi tiết (chỉ rõ từng beat cần sửa gì để M2 viết lại không lặp lại lỗi cũ).\n"
-            "7. TÁCH ĐÔI TTS VOICEOVER & PHỤ ĐỀ HIỂN THỊ (BẮT BUỘC ĐIỀN ĐỦ 5 BEAT TRONG `beats_patched`):\n"
-            "   - `tts_voiceover_vi`: Văn nói tiếng Việt CÓ DẤU ĐẦY ĐỦ 100% tự nhiên cho máy đọc (VD: 'một trăm tám mươi mi li lít', 'bốn trăm hai mươi nghìn đồng').\n"
-            "   - `subtitle_text_vi`: BẮT BUỘC LÀ CÂU PHỤ ĐỀ ĐẦY ĐỦ NỘI DUNG CÓ DẤU TIẾNG VIỆT KHỚP VỚI `tts_voiceover_vi` (TUYỆT ĐỐI KHÔNG chép `on_screen_text_vi` vào đây!), chỉ đổi số/đơn vị sang ký hiệu gọn (`180ml`, `900ml`, `89k`, `420k`, `1,85tr`, `57°`, `4000 DPI`, `Inox 304`).\n"
+            "7. TÁCH ĐÔI TTS VOICEOVER & PHỤ ĐỀ HIỂN THỊ — TỐI ƯU NHỊP ĐỌC NHƯ NGƯỜI THẬT (BẮT BUỘC ĐIỀN ĐỦ 5 BEAT TRONG `beats_patched`):\n"
+            "   - `tts_voiceover_vi`: Văn nói tiếng Việt CÓ DẤU ĐẦY ĐỦ 100%, ngắt thành **2 câu ngắn rõ nghĩa (10–16 từ/câu)** kết thúc bằng `.`, `?`, `!` để AI TTS đọc đúng nhịp điệu người thật, KHÔNG BAO GIỜ viết 1 câu quá 22 từ không dấu ngắt. Đọc thông số và mã sản phẩm thật mượt tai (VD: 'mười hai nghìn pát can', 'bốn nghìn mi li am pe giờ', 'chỉ số hoàn màu trên 95', 'mẫu Baseus A3 bản Lai', 'máy hút chân không nhà Bear'); TUYỆT ĐỐI KHÔNG để mã linh kiện dài khó đọc (`VS-B01V1`, `YLTD003`, `CKS321`) hay ký hiệu `_`, `>`, `<`, `/` trong `tts_voiceover_vi`.\n"
+            "   - `subtitle_text_vi`: BẮT BUỘC LÀ CÂU PHỤ ĐỀ ĐẦY ĐỦ NỘI DUNG CÓ DẤU TIẾNG VIỆT KHỚP ĐÚNG DẤU NGẮT CÂU VỚI `tts_voiceover_vi` (TUYỆT ĐỐI KHÔNG chép `on_screen_text_vi` vào đây!), chỉ đổi số/đơn vị/tên mẫu sang ký hiệu gọn đẹp trên màn hình (`180ml`, `12.000Pa`, `4000mAh`, `Ra>95`, `89k`, `420k`, `1,85tr`, `Baseus A3 Lite`, `Inox 304`).\n"
             "   - `on_screen_text_vi`: Chữ tiêu đề ngắn gọn tối đa 8 từ, tiếng Việt CÓ DẤU ĐẦY ĐỦ.\n"
-            "   - `was_auto_patched`: Đặt `true` nếu beat đó có lỗi thực tế/nhược điểm/mất dấu/diễn đạt đã được chỉnh lại; `false` nếu nội dung gốc đã chuẩn.\n"
+            "   - `was_auto_patched`: Đặt `true` nếu beat đó có lỗi thực tế/nhược điểm/mất dấu/nhịp đọc TTS cứng nhắc đã được chỉnh lại; `false` nếu nội dung gốc đã chuẩn.\n"
             "8. CỔNG CHẶN TIẾNG VIỆT KHÔNG DẤU (`DIACRITIC_OR_SPELLING` — ZERO TOLERANCE): Nếu bất kỳ câu thoại `voiceover_vi`, `on_screen_text_vi` hay `title_vi` nào viết tiếng Việt không dấu hoặc mất dấu từng cụm từ, BẮT BUỘC gắn `DIACRITIC_OR_SPELLING` (`severity=\"NEEDS_M2_REWRITE\"`), chấm `tts_and_visual_readiness_score = 0.0`, đặt `needs_m2_rewrite = true`!"
         )
 

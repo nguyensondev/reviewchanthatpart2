@@ -103,7 +103,7 @@ VOICE_POOL: List[Tuple[str, Literal["FEMALE", "MALE"], str]] = [
     ("BV074_streaming", "FEMALE", "vi-VN-HoaiMyNeural"),
     ("BV075_streaming", "MALE", "vi-VN-NamMinhNeural"),
 ]
-VOICE_RATE = "+10%"
+VOICE_RATE = "+8%"
 
 _HIGHLIGHT_PAT = re.compile(
     r"(\b(?:\d+(?:[.,]\d+)?(?:\s*x\s*\d+)?\s*(?:k|tr|ml|mm|cm|g|kg|W|V|độ|DPI|K|Ra\d+)|"
@@ -206,72 +206,104 @@ def _highlight_ass_keywords(text: str) -> str:
 
 def _split_aligned_clauses(tts_text: str, sub_text: str) -> List[Tuple[str, str]]:
     """
-    Split a beat's (tts_voiceover_vi, subtitle_text_vi) cleanly into 2 aligned clauses (~3.0-5.0s each)
-    so each beat gets 2 distinct visual cuts and balanced readable subtitles.
+    Split a beat's (tts_voiceover_vi, subtitle_text_vi) cleanly into 1 or 2 natural spoken clauses.
+    CRITICAL RHYTHM RULE:
+      1. Strictly prefer true sentence boundaries (`. ! ?`) where both sides have >= 5 words.
+      2. Otherwise, allow a natural clause boundary (`, ; :`) ONLY if both sides have >= 6 words
+         (preserving a trailing `,` on `t1` so M4 uses a short 0.06s breath pause instead of a hard stop).
+      3. NEVER blindly chop a sentence mid-phrase at `len(words) // 2` — keep it intact as 1 natural
+         spoken clause so TTS preserves human prosody and sentence meaning.
     """
     tts = " ".join(tts_text.strip().split())
     sub = " ".join(sub_text.strip().split())
-    if len(tts.split()) <= 14:
+    if len(tts.split()) <= 15:
         return [(tts.rstrip(",;:"), sub.rstrip(",;:"))]
 
-    sep_re = re.compile(r"[.!?;:,]\s+")
-    tts_seps = list(sep_re.finditer(tts))
-    sub_seps = list(sep_re.finditer(sub))
+    def _align_sub_split(
+        sub_str: str,
+        target_ratio: float,
+        sep_pattern: re.Pattern[str],
+        tts_sep_count: int,
+        tts_best_idx: int,
+    ) -> Tuple[str, str]:
+        sub_seps = list(sep_pattern.finditer(sub_str))
+        if len(sub_seps) == tts_sep_count and tts_best_idx < len(sub_seps):
+            sm = sub_seps[tts_best_idx]
+            return sub_str[: sm.start() + 1].strip().rstrip(",;:"), sub_str[sm.end() :].strip().rstrip(",;:")
+        if sub_seps:
+            sm = min(sub_seps, key=lambda m: abs((m.end() / max(1, len(sub_str))) - target_ratio))
+            return sub_str[: sm.start() + 1].strip().rstrip(",;:"), sub_str[sm.end() :].strip().rstrip(",;:")
+        any_seps = list(re.finditer(r"[.!?;:,]\s+", sub_str))
+        if any_seps:
+            sm = min(any_seps, key=lambda m: abs((m.end() / max(1, len(sub_str))) - target_ratio))
+            return sub_str[: sm.start() + 1].strip().rstrip(",;:"), sub_str[sm.end() :].strip().rstrip(",;:")
+        sw = sub_str.split()
+        s_mid = max(1, min(len(sw) - 1, int(round(len(sw) * target_ratio))))
+        return " ".join(sw[:s_mid]).rstrip(",;:"), " ".join(sw[s_mid:]).rstrip(",;:")
 
-    mid_candidates = [
+    # Priority 1: True sentence boundaries (. ! ?)
+    sent_re = re.compile(r"[.!?]\s+")
+    sent_seps = list(sent_re.finditer(tts))
+    sent_candidates = [
         (idx, m)
-        for idx, m in enumerate(tts_seps)
-        if 0.25 <= (m.end() / max(1, len(tts))) <= 0.78
+        for idx, m in enumerate(sent_seps)
+        if len(tts[: m.start() + 1].split()) >= 5 and len(tts[m.end() :].split()) >= 5
     ]
-    if mid_candidates:
+    if sent_candidates:
         best_idx, best_m = min(
-            mid_candidates,
+            sent_candidates,
             key=lambda pair: abs((pair[1].end() / max(1, len(tts))) - 0.50),
         )
-        t1 = tts[: best_m.start() + 1].strip().rstrip(",;:")
-        t2 = tts[best_m.end() :].strip().rstrip(",;:")
-
-        if len(sub_seps) == len(tts_seps):
-            sm = sub_seps[best_idx]
-            s1 = sub[: sm.start() + 1].strip().rstrip(",;:")
-            s2 = sub[sm.end() :].strip().rstrip(",;:")
-        else:
-            target_ratio = best_m.end() / max(1, len(tts))
-            if sub_seps:
-                sm = min(
-                    sub_seps,
-                    key=lambda m: abs((m.end() / max(1, len(sub))) - target_ratio),
-                )
-                s1 = sub[: sm.start() + 1].strip().rstrip(",;:")
-                s2 = sub[sm.end() :].strip().rstrip(",;:")
-            else:
-                sw = sub.split()
-                s_mid = max(1, int(round(len(sw) * target_ratio)))
-                s1 = " ".join(sw[:s_mid])
-                s2 = " ".join(sw[s_mid:])
-
+        t1 = tts[: best_m.start() + 1].strip()
+        t2 = tts[best_m.end() :].strip()
+        s1, s2 = _align_sub_split(
+            sub, best_m.end() / max(1, len(tts)), sent_re, len(sent_seps), best_idx
+        )
         if t1 and t2 and s1 and s2:
             return [(t1, s1), (t2, s2)]
 
-    tw = tts.split()
-    sw = sub.split()
-    t_mid = len(tw) // 2
-    s_mid = max(1, int(round(len(sw) * (t_mid / max(1, len(tw))))))
-    return [
-        (" ".join(tw[:t_mid]).rstrip(",;:"), " ".join(sw[:s_mid]).rstrip(",;:")),
-        (" ".join(tw[t_mid:]).rstrip(",;:"), " ".join(sw[s_mid:]).rstrip(",;:")),
+    # Priority 2: Natural clause boundaries (, ; :) with >= 6 words on BOTH sides
+    clause_re = re.compile(r"[,;:]\s+")
+    clause_seps = list(clause_re.finditer(tts))
+    clause_candidates = [
+        (idx, m)
+        for idx, m in enumerate(clause_seps)
+        if len(tts[: m.start()].split()) >= 6 and len(tts[m.end() :].split()) >= 6
     ]
+    if clause_candidates:
+        best_idx, best_m = min(
+            clause_candidates,
+            key=lambda pair: abs((pair[1].end() / max(1, len(tts))) - 0.50),
+        )
+        # Keep trailing comma on t1 as a signal to TTS synthesis to use a brief 0.06s breath pause
+        t1 = tts[: best_m.start()].strip().rstrip(",;:") + ","
+        t2 = tts[best_m.end() :].strip().rstrip(",;:")
+        s1, s2 = _align_sub_split(
+            sub, best_m.end() / max(1, len(tts)), clause_re, len(clause_seps), best_idx
+        )
+        if t1 and t2 and s1 and s2:
+            return [(t1, s1), (t2, s2)]
+
+    # Priority 3: Keep single continuous sentence intact — NEVER chop mid-phrase!
+    return [(tts.rstrip(",;:"), sub.rstrip(",;:"))]
 
 
 def _split_utf8_chunks(text: str, max_bytes: int = 240) -> List[str]:
-    """Split text cleanly on punctuation or word boundaries without exceeding `max_bytes` UTF-8 bytes."""
+    """Split text cleanly on sentence (`.!?`), then clause (`,;:`), then word boundaries within `max_bytes` UTF-8."""
     clean = " ".join(text.strip().split())
     if not clean:
         return []
     if len(clean.encode("utf-8")) <= max_bytes:
         return [clean]
 
-    raw_pieces = re.split(r"(?<=[,;:])\s+", clean)
+    sent_pieces = re.split(r"(?<=[.!?])\s+", clean)
+    raw_pieces: List[str] = []
+    for sp in sent_pieces:
+        if len(sp.encode("utf-8")) <= max_bytes:
+            raw_pieces.append(sp)
+        else:
+            raw_pieces.extend(re.split(r"(?<=[,;:])\s+", sp))
+
     words_or_pieces: List[str] = []
     for piece in raw_pieces:
         if len(piece.encode("utf-8")) <= max_bytes:
@@ -1077,14 +1109,18 @@ class M4VideoProducerEngine:
         """Step M4.3: Synthesize one clause using ONLY `locked_voice` (strict 1-voice-per-video lock)."""
         if out_wav.exists() and out_wav.stat().st_size > 1000:
             return _get_audio_duration(out_wav)
-        clean_text = normalize_vietnamese_for_tts(text).strip().rstrip(",;:")
+
+        raw_stripped = (text or "").strip()
+        is_comma_pause = raw_stripped.endswith((",", ";", ":"))
+        clean_text = normalize_vietnamese_for_tts(raw_stripped).strip().rstrip(",;:")
         if clean_text and clean_text[-1] not in ".!?":
-            clean_text += "."
+            # For comma-split clauses, leave comma or short breath; for full sentences, close with '.'
+            clean_text += "," if is_comma_pause else "."
+        pad_dur_sec = 0.06 if is_comma_pause else 0.12
 
         tmp_mp3 = out_mp3.with_suffix(".tmp.mp3")
         tmp_mp3.unlink(missing_ok=True)
         atempo_prefix = ""
-        is_female = locked_voice in ("BV074_streaming", "vi-VN-HoaiMyNeural")
         provider_alive = getattr(self, "_tts_provider_alive", None)
         if provider_alive is None:
             provider_alive = {"tiktok": True, "edge": True}
@@ -1092,7 +1128,9 @@ class M4VideoProducerEngine:
 
         synth_done = False
 
-        if locked_voice in ("BV074_streaming", "BV075_streaming") and provider_alive.get("tiktok", True):
+        if locked_voice in ("BV074_streaming", "BV075_streaming"):
+            if not provider_alive.get("tiktok", True):
+                raise RuntimeError(f"TikTok TTS marked unavailable; escalating to Edge Neural TTS.")
             chunks = _split_utf8_chunks(clean_text, max_bytes=240)
             chunk_mp3s: List[Path] = []
             try:
@@ -1108,7 +1146,7 @@ class M4VideoProducerEngine:
                             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
                             method="POST",
                         )
-                        with urllib.request.urlopen(req, timeout=5, context=_SSL_CTX) as resp:
+                        with urllib.request.urlopen(req, timeout=6, context=_SSL_CTX) as resp:
                             body = json.loads(resp.read().decode("utf-8"))
                         if not body.get("success") or not body.get("data"):
                             raise RuntimeError(f"TikTok TTS unsuccessful response: {body}")
@@ -1160,37 +1198,45 @@ class M4VideoProducerEngine:
                 synth_done = True
             except Exception as exc:
                 provider_alive["tiktok"] = False
-                print(
-                    f"  [M4.3 TTS] TikTok proxy unavailable ({exc}); switching locked voice '{locked_voice}' "
-                    f"to resilient Google Neural TTS for full-video voice uniformity.",
-                    flush=True,
-                )
                 tmp_mp3.unlink(missing_ok=True)
                 for p in chunk_mp3s:
                     p.unlink(missing_ok=True)
-
-        elif locked_voice.startswith("vi-VN-") and provider_alive.get("edge", True):
-            try:
-                tmp_mp3.unlink(missing_ok=True)
-                comm = edge_tts.Communicate(text=clean_text, voice=locked_voice, rate=VOICE_RATE)
-                await comm.save(str(tmp_mp3))
-                if tmp_mp3.exists() and tmp_mp3.stat().st_size > 500:
-                    tmp_mp3.replace(out_mp3)
-                    synth_done = True
-                    await asyncio.sleep(0.3)
-                else:
-                    raise RuntimeError("Edge TTS returned empty file")
-            except Exception as exc:
-                provider_alive["edge"] = False
                 print(
-                    f"  [M4.3 TTS] Edge TTS unavailable ({exc}); switching locked voice '{locked_voice}' "
-                    f"to resilient Google Neural TTS for full-video voice uniformity.",
+                    f"  [M4.3 TTS] TikTok proxy unavailable ({exc}); escalating to Microsoft Edge Neural TTS "
+                    f"(never jumping straight to robotic Google Translate TTS).",
                     flush=True,
                 )
-                tmp_mp3.unlink(missing_ok=True)
+                raise RuntimeError(f"TikTok TTS failed ({exc})") from exc
+
+        elif locked_voice.startswith("vi-VN-"):
+            if not provider_alive.get("edge", True):
+                raise RuntimeError(f"Edge Neural TTS marked unavailable.")
+            last_edge_exc: Optional[Exception] = None
+            for attempt in range(1, 3):
+                try:
+                    tmp_mp3.unlink(missing_ok=True)
+                    comm = edge_tts.Communicate(text=clean_text, voice=locked_voice, rate=VOICE_RATE)
+                    await comm.save(str(tmp_mp3))
+                    if tmp_mp3.exists() and tmp_mp3.stat().st_size > 500:
+                        tmp_mp3.replace(out_mp3)
+                        synth_done = True
+                        await asyncio.sleep(0.25)
+                        break
+                    raise RuntimeError("Edge TTS returned empty file")
+                except Exception as exc:
+                    last_edge_exc = exc
+                    tmp_mp3.unlink(missing_ok=True)
+                    if attempt < 2:
+                        await asyncio.sleep(0.5)
+            if not synth_done:
+                print(
+                    f"  [M4.3 TTS] Edge Neural voice '{locked_voice}' failed after 2 tries ({last_edge_exc}).",
+                    flush=True,
+                )
+                raise RuntimeError(f"Edge TTS '{locked_voice}' failed: {last_edge_exc}") from last_edge_exc
 
         if not synth_done:
-            # Resilient Google Neural TTS fallback (preserves 100% single-voice uniformity across all clauses)
+            # Emergency last-resort fallback ONLY when both TikTok TTS & Edge Neural TTS are unreachable
             chunks = _split_utf8_chunks(clean_text, max_bytes=195)
             chunk_mp3s = []
             try:
@@ -1266,10 +1312,7 @@ class M4VideoProducerEngine:
                         for p in chunk_mp3s:
                             p.unlink(missing_ok=True)
 
-                if is_female:
-                    atempo_prefix = "atempo=1.24,"
-                else:
-                    atempo_prefix = "asetrate=24000*0.89,aresample=24000,atempo=1.34,"
+                atempo_prefix = "atempo=1.18,"
             except Exception:
                 tmp_mp3.unlink(missing_ok=True)
                 for p in chunk_mp3s:
@@ -1285,7 +1328,7 @@ class M4VideoProducerEngine:
                 "-af",
                 f"{atempo_prefix}silenceremove=start_periods=1:start_silence=0.03:start_threshold=-45dB,"
                 "areverse,silenceremove=start_periods=1:start_silence=0.05:start_threshold=-45dB,"
-                "areverse,apad=pad_dur=0.14",
+                f"areverse,apad=pad_dur={pad_dur_sec:.2f}",
                 "-ar",
                 "44100",
                 "-ac",
@@ -1674,45 +1717,49 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 clause_specs.append((b, clause_counter, tts_part, sub_part, pool))
 
         voice_candidates = _choose_voice_for_video(voices_used_today, preferred_voice=preferred_voice)
+        ordered_voice_attempts: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
+        for primary_tiktok_voice, gender, fallback_edge in voice_candidates:
+            ordered_voice_attempts.append((primary_tiktok_voice, gender))
+            ordered_voice_attempts.append((fallback_edge, gender))
+        # Last-resort emergency fallback only if both TikTok & Edge Neural TTS are completely unreachable
+        ordered_voice_attempts.append(("google_female", "FEMALE"))
+
         sem = asyncio.Semaphore(1)
         locked_voice: Optional[str] = None
         locked_gender: Literal["FEMALE", "MALE"] = "FEMALE"
         tts_map: Dict[int, Tuple[float, Path]] = {}
 
-        for primary_tiktok_voice, gender, fallback_edge in voice_candidates:
-            for candidate_voice in (primary_tiktok_voice, fallback_edge):
-                try:
-                    candidate_map: Dict[int, Tuple[float, Path]] = {}
-                    async with sem:
-                        for _, c_idx, tts_txt, _, _ in clause_specs:
-                            mp3_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.mp3"
-                            wav_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.wav"
-                            dur = await self._synth_clause_with_locked_voice(
-                                tts_txt,
-                                mp3_p,
-                                wav_p,
-                                locked_voice=candidate_voice,
-                            )
-                            candidate_map[c_idx] = (dur, wav_p)
-                    tts_map = candidate_map
-                    locked_voice = candidate_voice
-                    locked_gender = gender
-                    print(
-                        f"[M4.3] Voice locked for {script.script_id}: {locked_voice} ({locked_gender}) "
-                        f"[{len(clause_specs)}/{len(clause_specs)} clauses uniform]",
-                        flush=True,
-                    )
-                    break
-                except Exception as exc:
-                    print(
-                        f"[M4.3] Whole-video voice '{candidate_voice}' failed on {script.script_id}: {exc}. "
-                        f"Discarding partial clips to guarantee 1-voice uniformity...",
-                        flush=True,
-                    )
-                    for p in seg_dir.glob(f"c*_{candidate_voice}.*"):
-                        p.unlink(missing_ok=True)
-            if locked_voice and tts_map:
+        for candidate_voice, gender in ordered_voice_attempts:
+            try:
+                candidate_map: Dict[int, Tuple[float, Path]] = {}
+                async with sem:
+                    for _, c_idx, tts_txt, _, _ in clause_specs:
+                        mp3_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.mp3"
+                        wav_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.wav"
+                        dur = await self._synth_clause_with_locked_voice(
+                            tts_txt,
+                            mp3_p,
+                            wav_p,
+                            locked_voice=candidate_voice,
+                        )
+                        candidate_map[c_idx] = (dur, wav_p)
+                tts_map = candidate_map
+                locked_voice = candidate_voice
+                locked_gender = gender
+                print(
+                    f"[M4.3] Voice locked for {script.script_id}: {locked_voice} ({locked_gender}) "
+                    f"[{len(clause_specs)}/{len(clause_specs)} clauses uniform]",
+                    flush=True,
+                )
                 break
+            except Exception as exc:
+                print(
+                    f"[M4.3] Whole-video voice '{candidate_voice}' failed on {script.script_id}: {exc}. "
+                    f"Discarding partial clips to guarantee 1-voice uniformity...",
+                    flush=True,
+                )
+                for p in seg_dir.glob(f"c*_{candidate_voice}.*"):
+                    p.unlink(missing_ok=True)
 
         if not locked_voice or not tts_map:
             raise RuntimeError(

@@ -453,6 +453,7 @@ class M5PublisherEngine:
                 "status": {
                     "privacyStatus": "public",
                     "selfDeclaredMadeForKids": False,
+                    "containsSyntheticMedia": True,
                 },
             },
             "comment_threads_insert_body": {
@@ -539,6 +540,7 @@ class M5PublisherEngine:
                 "status": {
                     "privacyStatus": str(yt_creds.get("privacy_status") or "public"),
                     "selfDeclaredMadeForKids": False,
+                    "containsSyntheticMedia": True,
                 },
             }
 
@@ -554,9 +556,14 @@ class M5PublisherEngine:
                 headers=upload_headers,
                 json=meta_body,
             )
-            if init_resp.status_code == 400 and "invalidTags" in init_resp.text:
-                # Automatic self-healing retry without tags if YouTube ever rejects a specific tag token
-                meta_body["snippet"].pop("tags", None)
+            if init_resp.status_code == 400 and (
+                "invalidTags" in init_resp.text or "containsSyntheticMedia" in init_resp.text
+            ):
+                # Automatic self-healing retry if YouTube rejects a tag token or synthetic-media status field
+                if "invalidTags" in init_resp.text:
+                    meta_body["snippet"].pop("tags", None)
+                if "containsSyntheticMedia" in init_resp.text:
+                    meta_body["status"].pop("containsSyntheticMedia", None)
                 init_resp = client.post(
                     "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
                     headers=upload_headers,

@@ -350,7 +350,11 @@ NGUYÊN TẮC VÀNG: VĂN NÓI ĐỜI THƯỜNG CỦA NGƯỜI THẬT — CẤM 
 2. **ĐỘ DÀI TỰ NHIÊN THEO ĐÚNG `NGÂN SÁCH ĐỘ DÀI KỊCH BẢN TỐI ƯU` CỦA TỪNG SKU / FORMAT**:
    - Nếu `narrative_angle == "FAST_25S_MICRO_LOOP"`: viết gọn ghẽ **85 – 108 từ** (17 – 22 từ/beat, trọn câu không cụt ý).
    - Các format còn lại: bám sát ngân sách từ (`125 – 145 từ` hoặc `150 – 180 từ`) đã tính sẵn ở từng nhóm công năng bên trên.
-3. **CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1..5`) MƯỢT MÀ & KHỚP CẢNH QUAY (`visual_instruction_vi`)**:
+3. **NHỊP CÂU CHUẨN NGƯỜI NÓI & CÁCH ĐỌC MÃ MÁY / THÔNG SỐ (BẮT BUỘC ĐỂ AI TTS ĐỌC NHƯ NGƯỜI THẬT)**:
+   - **Ngắt câu rõ nghĩa, dứt khoát**: Mỗi phân cảnh (beat) viết thành **2 câu ngắn rõ nghĩa (mỗi câu khoảng 10 – 16 từ)**, kết thúc dứt khoát bằng dấu chấm `.`, chấm hỏi `?`, hoặc chấm than `!` để giọng đọc ngắt nghỉ đúng nhịp người thật. TUYỆT ĐỐI KHÔNG viết một câu dài lê thê trên 22 từ không có dấu ngắt câu.
+   - **Không đọc mã xuất xưởng kiểu đánh vần từng ký tự**: Tuyệt đối không nhồi mã linh kiện dài khó đọc như `VS-B01V1`, `YLTD003`, `CKS321GRN`, hay dấu gạch dưới `A3_Lite` nguyên xi vào lời thoại `voiceover_vi`! Hãy gọi tự nhiên như reviewer ngoài đời: *"mẫu Baseus A3 bản Lite"*, *"đèn treo màn hình nhà Yeelight"*, *"máy hút chân không nhà Bear"*, *"cân điện tử nhà Tanita"*.
+   - **Đọc thông số mượt mà dễ nghe**: Viết gọn gàng theo văn nói (VD: *"lực hút 12 nghìn Pa"*, *"pin 4 nghìn mAh"*, *"chỉ số hoàn màu trên 95"*, *"giá khoảng 420 nghìn"*), không nhồi dày đặc ký hiệu `>`, `<`, `/`, `()`, `_` trong cùng một câu thoại.
+4. **CẤU TRÚC 5 PHÂN CẢNH (`beat_index = 1..5`) MƯỢT MÀ & KHỚP CẢNH QUAY (`visual_instruction_vi`)**:
    - Beat 1 (`HOOK_FOIL_WARNING`): Mở màn sắc bén theo đúng tinh thần của `narrative_angle` được giao + đối chiếu tự nhiên với điểm yếu hàng rẻ (`rejected_foils`, đúng giá từ M1).
    - Beat 2 (`WINNER_REVEAL_SPECS` / `COMBO_STEP_1`): Lời dẫn tự nhiên giới thiệu thương hiệu + `model_code` + cơ chế/vật liệu/thông số cốt lõi giải quyết vấn đề ngoài đời thực.
    - Beat 3 (`HEAD_TO_HEAD_PROOF` / `COMBO_STEP_2_TRANSITION`): Đào sâu trải nghiệm thực tế các điểm sáng đắt giá nhất (`highlight_pros_vi`) vượt trội so với dòng phổ thông.
