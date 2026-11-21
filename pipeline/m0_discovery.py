@@ -805,6 +805,7 @@ class M0AutonomousDiscoveryEngine:
         history: Dict[str, Any],
         topic_hint: Optional[str] = None,
         max_categories: int = 3,
+        ignore_trends: bool = False,
     ) -> LLMSubNichePlanResponse:
         blocked_cat_ids, fresh_tech, fresh_kitchen = self._get_blocked_and_fresh_categories(history)
         reg_blocks = self.sku_registry.get_blocked_categories_and_skus()
@@ -834,12 +835,16 @@ class M0AutonomousDiscoveryEngine:
         fresh_suggestions_str = "\n".join(suggested_fresh_lines)
 
         # Upgrade 2 (M_TREND Integration): Live-check active non-expired trends with Half-Life Time-Decay
-        live_trends = [
-            t
-            for t in load_active_trend_opportunities()
-            if self._resolve_canonical_category_id(t.product_concept_id) not in blocked_cat_ids
-            and t.re_entry_action not in ("SUPPRESSED_RECENTLY_COVERED", "DUPLICATE_EVENT_IGNORED")
-        ]
+        live_trends = (
+            []
+            if ignore_trends
+            else [
+                t
+                for t in load_active_trend_opportunities()
+                if self._resolve_canonical_category_id(t.product_concept_id) not in blocked_cat_ids
+                and t.re_entry_action not in ("SUPPRESSED_RECENTLY_COVERED", "DUPLICATE_EVENT_IGNORED")
+            ]
+        )
         if live_trends and not topic_hint:
             trend_lines = [
                 f"  * 🔥 [{t.priority_tier} | Điểm thực={t.score_breakdown.effective_score_now_100}/100 | {t.domain}] "
@@ -1048,16 +1053,18 @@ Hãy tổng hợp và xuất ra 4-5 ứng viên cạnh tranh đa thương hiệu
         topic_hint: Optional[str] = None,
         max_categories: int = 3,
         output_path: Path = OUTPUT_POOL_PATH,
+        ignore_trends: bool = False,
     ) -> M0CandidatePoolOutput:
         history = load_m0_history()
         domain = self._choose_next_domain(history, override_domain)
 
-        print(f"[M0] 1/4 Planning sub-niche for domain={domain} (hint={topic_hint!r})...", flush=True)
+        print(f"[M0] 1/4 Planning sub-niche for domain={domain} (hint={topic_hint!r}, ignore_trends={ignore_trends})...", flush=True)
         plan = self.step_m0_1_plan_subniche(
             domain=domain,
             history=history,
             topic_hint=topic_hint,
             max_categories=max_categories,
+            ignore_trends=ignore_trends,
         )
         print(
             f"[M0] Planned sub-niche: {plan.sub_niche_id} ({plan.sub_niche_name_vi}) "

@@ -269,7 +269,23 @@ def run_planning_batch(topic_hint: Optional[str] = None, max_categories: int = 3
 
     print("\n=== [STEP C - PLAN] Running M0 -> M1 -> M1.5 -> M2 <-> M3 Discovery & Script Batch ===", flush=True)
     M0AutonomousDiscoveryEngine().run(topic_hint=topic_hint, max_categories=max_categories)
-    M1SmartFilterEngine().run()
+    try:
+        M1SmartFilterEngine().run()
+    except RuntimeError as m1_exc:
+        if "0 surviving candidates" in str(m1_exc):
+            print(
+                f"[PLAN SELF-HEAL] ⚠️ Lượt M1 không có SKU nào vượt qua cổng video hãng ({m1_exc}). "
+                "Tự động thử lại 1 lượt EVERGREEN_ROTATION để tìm nhóm sản phẩm có video hãng sạch...",
+                flush=True,
+            )
+            M0AutonomousDiscoveryEngine().run(
+                topic_hint=None,
+                max_categories=max(2, max_categories),
+                ignore_trends=True,
+            )
+            M1SmartFilterEngine().run()
+        else:
+            raise
     M15ComboCuratorEngine().run()
     run_m2_m3_with_qaqc_loop(qm=qm)
 

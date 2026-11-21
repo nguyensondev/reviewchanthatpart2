@@ -43,10 +43,12 @@ PRODUCT_ANCHOR_KEYWORDS: Tuple[str, ...] = (
     "stand", "laptop", "holder", "riser", "foldable", "aluminum",
     "charger", "gan", "charging", "power", "adapter", "station",
     "hub", "dock", "docking", "usb", "hdmi", "type c", "multiport",
-    "keyboard", "mechanical", "keychron", "switch", "low profile",
+    "keyboard", "mechanical", "keychron", "nuphy", "switch", "low profile", "qmk", "keycap",
     "arm", "mount", "gas spring", "vesa",
     "cable", "magnetic", "retractable", "cord",
     "duster", "vacuum", "cleaner", "blower", "compressed air", "suction",
+    "purifier", "hepa", "air", "filter", "dehumidifier", "humidifier", "dryer", "clothes",
+    "fan", "cooling", "portable", "rechargeable",
     "scale", "weighing", "kitchen", "cooking", "gram", "tanita",
     "thermometer", "temperature", "probe", "meat", "food",
     "sealer", "vacuum sealer", "packaging", "preservation",
@@ -60,6 +62,7 @@ PRODUCT_ANCHOR_KEYWORDS: Tuple[str, ...] = (
     "nhiet ke", "hut chan khong", "han mieng tui", "binh xit", "chai xit",
     "danh bot", "tao bot", "am sieu toc", "am dun", "may xay", "coi xay",
     "dong ho", "bam gio", "hen gio", "xa phong", "rua chen", "gia dung", "nha bep",
+    "loc khong khi", "hut am", "say quan ao", "quat", "quat tich dien", "bui min",
 )
 
 # Short brand names that collide with common words / movie / gaming channels on YouTube
@@ -203,12 +206,15 @@ class OfficialBrandVideoGate:
         if allowed_channels:
             allowed_norms.add(f"{brand_norm} official")
             allowed_norms.add(f"{brand_norm} global")
+            allowed_norms.add(f"{brand_norm} vietnam")
+            allowed_norms.add(f"{brand_norm} vn")
             if brand_norm not in AMBIGUOUS_SHORT_BRANDS:
                 allowed_norms.add(brand_norm)
         else:
             # Unlisted brand: only trust explicitly suffixed official/global manufacturer channels
             allowed_norms.add(f"{brand_norm} official")
             allowed_norms.add(f"{brand_norm} global")
+            allowed_norms.add(f"{brand_norm} vietnam")
 
         if channel_norm not in allowed_norms:
             return False
@@ -221,10 +227,10 @@ class OfficialBrandVideoGate:
         if not any(_has_whole_word(title_norm, anchor) for anchor in PRODUCT_ANCHOR_KEYWORDS):
             return False
 
-        # 7. Whole-Word Brand + Model Verification (no 2-char substring false matches like 'vs' or 'm1'!)
-        if not _has_whole_word(title_norm, brand_norm):
-            return False
-
+        # 7. Whole-Word Model / Brand Verification (no 2-char substring false matches like 'vs' or 'm1'!)
+        # Note: Official brand channels (e.g. Keychron, Xiaomi, Logitech) often omit their own brand name
+        # from their own video title when stating the model code (e.g. "K3 Pro Wireless Mechanical Keyboard").
+        has_brand_in_title = _has_whole_word(title_norm, brand_norm)
         model_norm = _norm_text(model_code or "")
         model_tokens = [
             t for t in model_norm.split()
@@ -232,8 +238,11 @@ class OfficialBrandVideoGate:
             and t not in ("series", "pro", "plus", "mini", "max", "lite")
         ]
         if model_tokens:
-            if not any(_has_whole_word(title_norm, tok) for tok in model_tokens):
+            has_model_in_title = any(_has_whole_word(title_norm, tok) for tok in model_tokens)
+            if not has_model_in_title:
                 return False
+        elif not has_brand_in_title and brand_norm not in channel_norm:
+            return False
 
         return True
 
