@@ -44,6 +44,7 @@ from pipeline.schemas_m5 import (
 from pipeline.schemas_m_trend import load_active_trend_opportunities
 from pipeline.shared_utils import (
     AffiliateCSVRepository,
+    format_vnd_short,
     sanitize_youtube_metadata_text,
     sanitize_youtube_tags,
     strip_accents as _strip_accents,
@@ -514,25 +515,25 @@ class PublishPackager:
                 base_title = f"Combo Gian Bếp Gọn Nhanh Chuẩn Xác: {b1} + {b2}"
         elif resolved_skus:
             s1 = resolved_skus[0]
-            price_k = max(1, s1.estimated_price_vnd // 1000)
+            price_str = format_vnd_short(s1.estimated_price_vnd)
             clean_mc = s1.model_code.replace("_", " ").strip()
             bm = f"{s1.brand} {clean_mc}".strip()
             if entry.category_id == "digital_kitchen_food_scale":
-                base_title = f"Cân Điện Tử Nhà Bếp Loại Nào Bền? Đánh Giá {bm} (~{price_k}k)"
+                base_title = f"{bm} (~{price_str}): Cân Điện Tử Nhà Bếp Có Bền Không?"
             elif entry.category_id == "screen_hanging_light_bar":
-                base_title = f"Đèn Treo Màn Hình Chống Chói ~{price_k}k: {bm} Có Đáng Mua?"
+                base_title = f"{bm} (~{price_str}): Đèn Treo Màn Hình Chống Chói Đáng Mua?"
             elif entry.category_id == "ergonomic_vertical_mouse":
-                base_title = f"Chuột Công Thái Học Đỡ Mỏi Cổ Tay: {bm} Có Đáng Giá ~{price_k}k?"
+                base_title = f"{bm} (~{price_str}): Chuột Công Thái Học Đỡ Mỏi Cổ Tay?"
             elif cat_short_vi:
-                base_title = f"{cat_short_vi} ~{price_k}k: {bm} Có Đáng Mua?"
+                base_title = f"{bm} (~{price_str}): {cat_short_vi} Có Đáng Mua?"
             else:
                 # Dynamic category fallback: extract short product type from product_name_vi without repeating "Đánh Giá"
                 prod_head = s1.product_name_vi
                 for token_rm in (s1.brand, clean_mc, s1.model_code):
                     if token_rm:
                         prod_head = re.sub(re.escape(token_rm), "", prod_head, flags=re.IGNORECASE)
-                prod_head = " ".join(prod_head.split()[:6]).strip(" -–,:") or bm
-                base_title = f"Review {prod_head} ~{price_k}k: {bm} Có Đáng Mua?"
+                prod_head = " ".join(prod_head.split()[:5]).strip(" -–,:") or "Sản Phẩm Chính Hãng"
+                base_title = f"{bm} (~{price_str}): {prod_head} Có Đáng Mua?"
         else:
             base_title = entry.title_vi.replace("_", " ").strip()
 
@@ -586,7 +587,7 @@ class PublishPackager:
             else entry.title_vi[:28]
         )
         primary_price = (
-            f"~{sum(s.estimated_price_vnd for s in resolved_skus) // 1000}k"
+            f"~{format_vnd_short(sum(s.estimated_price_vnd for s in resolved_skus))}"
             if resolved_skus
             else "chính hãng"
         )
@@ -781,13 +782,13 @@ class PublishPackager:
         pinned_lines: List[str] = []
 
         for s_item in resolved_skus:
-            price_k = max(1, s_item.estimated_price_vnd // 1000)
+            price_str = format_vnd_short(s_item.estimated_price_vnd)
             label = f"{s_item.brand} {s_item.model_code}".strip()
             for p_line in s_item.highlight_pros_vi[:2]:
                 pros_bullets.append(f"• {label}: {p_line}")
             if s_item.key_specs:
                 kv_str = ", ".join(f"{k}: {v}" for k, v in list(s_item.key_specs.items())[:3])
-                spec_bullets.append(f"• Thông số {label} (~{price_k}k): {kv_str}")
+                spec_bullets.append(f"• Thông số {label} (~{price_str}): {kv_str}")
             if s_item.honest_caveat_vi:
                 caveat_bullets.append(f"⚠️ Lưu ý {label}: {s_item.honest_caveat_vi}")
 
@@ -798,7 +799,7 @@ class PublishPackager:
             )
             shop_badge = f" [{s_item.shop_name}]" if s_item.shop_name else ""
             pinned_lines.append(
-                f"👉 {s_item.product_name_vi}{shop_badge} (~{price_k}k): {link_display}"
+                f"👉 {s_item.product_name_vi}{shop_badge} (~{price_str}): {link_display}"
             )
             if (
                 s_item.mall_search_affiliate_link

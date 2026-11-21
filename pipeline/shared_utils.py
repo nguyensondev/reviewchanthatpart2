@@ -437,6 +437,36 @@ def enforce_short_hook_title(raw_title: str, max_chars: int = 30) -> str:
     return " ".join(out) if out else clean[:max_chars].strip()
 
 
+def truncate_words_clean(text: str, max_chars: int = 42) -> str:
+    """Truncate text cleanly at a word boundary without ever slicing mid-word (fixes 'tự n' cutoffs)."""
+    clean = " ".join((text or "").strip().split())
+    if len(clean) <= max_chars:
+        return clean
+    words = clean.split()
+    out: List[str] = []
+    for w in words:
+        cand = " ".join(out + [w])
+        if len(cand) <= max_chars:
+            out.append(w)
+        else:
+            break
+    if out:
+        return " ".join(out).rstrip(",;:-")
+    return clean[:max_chars].strip()
+
+
+def format_vnd_short(price_vnd: int) -> str:
+    """Format VND price naturally for Vietnamese titles & cards: 3_450_000 -> '3,45tr', 420_000 -> '420k'."""
+    val = max(0, int(price_vnd or 0))
+    if val >= 1_000_000:
+        tr = val / 1_000_000.0
+        # Format up to 2 decimals, strip trailing zeros (3.45 -> 3,45tr; 1.80 -> 1,8tr; 2.00 -> 2tr)
+        s = f"{tr:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+        return f"{s}tr"
+    k = max(1, int(round(val / 1000.0)))
+    return f"{k}k"
+
+
 def parse_int_number(raw: str) -> int:
     s = str(raw or "").strip().lower()
     if not s:

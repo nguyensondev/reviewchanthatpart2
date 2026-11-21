@@ -585,8 +585,45 @@ class M5PublisherEngine:
             up_resp.raise_for_status()
             video_id = up_resp.json()["id"]
 
+            # Upload uniform 9:16 SKU cover thumbnail via YouTube Data API v3 `thumbnails.set`
+            # (YouTube requires waiting until `processingDetails.processingStatus == 'succeeded'` on Shorts)
+            cover_path = vpath.with_name(f"{vpath.stem}_cover.jpg")
+            waited_for_thumb_sec = 0
+            if cover_path.exists() and cover_path.stat().st_size > 10_000:
+                try:
+                    proc_ok = False
+                    for _ in range(6):
+                        st_resp = client.get(
+                            f"https://www.googleapis.com/youtube/v3/videos?part=processingDetails&id={video_id}",
+                            headers=headers,
+                        )
+                        if st_resp.status_code == 200:
+                            items = st_resp.json().get("items") or []
+                            p_stat = (items[0].get("processingDetails") or {}).get("processingStatus", "") if items else ""
+                            if p_stat == "succeeded":
+                                proc_ok = True
+                                break
+                        time.sleep(5)
+                        waited_for_thumb_sec += 5
+                    if proc_ok:
+                        th_resp = client.post(
+                            f"https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId={video_id}&uploadType=media",
+                            headers={**headers, "Content-Type": "image/jpeg"},
+                            content=cover_path.read_bytes(),
+                            timeout=60.0,
+                        )
+                        if th_resp.status_code == 200:
+                            print(f"[M5 YOUTUBE] Đã áp ảnh bìa SKU chuẩn 9:16 ({cover_path.name}) thành công!", flush=True)
+                        else:
+                            print(
+                                f"[M5 YOUTUBE] Đặt thumbnail tùy chỉnh chưa áp được (HTTP {th_resp.status_code}): {th_resp.text[:160]}",
+                                flush=True,
+                            )
+                except Exception as th_exc:
+                    print(f"[M5 YOUTUBE] Bỏ qua đặt thumbnail tùy chỉnh (không ảnh hưởng video): {th_exc}", flush=True)
+
             # Human delay before posting external-link comment (Anti-Spam Guard)
-            delay_s = HumanBehaviorGuard.sample_post_upload_comment_delay_sec()
+            delay_s = max(5, HumanBehaviorGuard.sample_post_upload_comment_delay_sec() - waited_for_thumb_sec)
             print(f"[M5 HUMAN GUARD] Chờ tự nhiên {delay_s}s trước khi thả Comment đầu tiên trên YouTube...", flush=True)
             time.sleep(delay_s)
 
@@ -659,6 +696,26 @@ class M5PublisherEngine:
                 },
             )
             fin_resp.raise_for_status()
+
+            # Upload uniform 9:16 SKU cover thumbnail for Facebook Reels (`POST /{video_id}/thumbnails`)
+            cover_path = vpath.with_name(f"{vpath.stem}_cover.jpg")
+            if cover_path.exists() and cover_path.stat().st_size > 10_000:
+                try:
+                    th_resp = client.post(
+                        f"https://graph.facebook.com/v21.0/{video_id}/thumbnails",
+                        data={"access_token": page_token, "is_preferred": "true"},
+                        files={"source": (cover_path.name, cover_path.read_bytes(), "image/jpeg")},
+                        timeout=60.0,
+                    )
+                    if th_resp.status_code == 200:
+                        print(f"[M5 FACEBOOK] Đã áp ảnh bìa SKU chuẩn 9:16 ({cover_path.name}) thành công!", flush=True)
+                    else:
+                        print(
+                            f"[M5 FACEBOOK] Đặt thumbnail Reels chưa áp được (HTTP {th_resp.status_code}): {th_resp.text[:160]}",
+                            flush=True,
+                        )
+                except Exception as th_exc:
+                    print(f"[M5 FACEBOOK] Bỏ qua đặt thumbnail Reels (không ảnh hưởng video): {th_exc}", flush=True)
 
             # Human delay before posting external-link comment (Anti-Spam Guard)
             delay_s = HumanBehaviorGuard.sample_post_upload_comment_delay_sec()

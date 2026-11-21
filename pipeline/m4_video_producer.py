@@ -47,7 +47,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 import cv2
 import edge_tts
 import yt_dlp
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from pipeline.bgm_library import ensure_bgm_library, pick_random_bgm_track
 from pipeline.brand_video_gate import OfficialBrandVideoGate
@@ -75,7 +75,9 @@ from pipeline.schemas_m4 import (
 from pipeline.shared_utils import (
     check_vietnamese_diacritics,
     enforce_short_hook_title,
+    format_vnd_short,
     normalize_vietnamese_for_tts,
+    truncate_words_clean,
 )
 from pipeline.sku_registry import SKURegistryManager
 from pipeline.video_registry import VideoRegistryManager
@@ -89,6 +91,7 @@ BRAND_OFFICIAL_CACHE_DIR = DATA_DIR / "brand_official_cache"
 WORK_DIR = DATA_DIR / "m4_work"
 OUTPUT_VIDEOS_DIR = PROJECT_ROOT / "output" / "videos"
 BGM_DIR = PROJECT_ROOT / "assets" / "bgm"
+SKU_THUMBS_DIR = PROJECT_ROOT / "assets" / "sku_thumbs"
 
 FONT_BOLD_PATH = MacOSLegacyRuntime.resolve_font_path(bold=True)
 FONT_REG_PATH = MacOSLegacyRuntime.resolve_font_path(bold=False)
@@ -439,14 +442,238 @@ def _render_pil_rounded_card(
     d.rounded_rectangle([0, 0, 12, h - 1], radius=6, fill=(*accent, 255))
     ft = ImageFont.truetype(FONT_BOLD_PATH, 38)
     fl = ImageFont.truetype(FONT_REG_PATH, 31)
-    d.text((36, 22), clean_title[:34], font=ft, fill=(*accent, 255))
+    d.text((36, 22), truncate_words_clean(clean_title, max_chars=32), font=ft, fill=(*accent, 255))
     y = 22 + 56
     for ln in lines[:3]:
         clean_ln = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", ln or "").strip()
-        d.text((36, y), "• " + clean_ln[:42], font=fl, fill=(244, 246, 250, 255))
+        d.text((36, y), "• " + truncate_words_clean(clean_ln, max_chars=42), font=fl, fill=(244, 246, 250, 255))
         y += 48
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
+
+
+def _extract_best_sku_frame_pil(
+    video_path: Path,
+    samples: Optional[List[SampledFrameMeta]] = None,
+) -> Optional[Image.Image]:
+    """
+    Extract the single cleanest, sharpest, face-free & caption-free frame from a SKU's official brand video
+    for use in the uniform 9:16 channel cover thumbnail.
+    """
+    if not video_path or not video_path.exists():
+        return None
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return None
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        dur = float(frame_count / fps) if fps > 0 and frame_count > 0 else 0.0
+
+        candidate_times: List[float] = []
+        if samples:
+            clean_samples = [
+                s for s in samples
+                if not s.has_face
+                and not s.has_caption_or_card
+                and 38.0 <= s.mean_luma <= 215.0
+                and s.std_luma >= 22.0
+            ]
+            if not clean_samples:
+                clean_samples = [s for s in samples if not s.has_face and 30.0 <= s.mean_luma <= 225.0]
+            clean_samples.sort(key=lambda s: s.sharpness, reverse=True)
+            candidate_times = [s.timestamp for s in clean_samples[:6]]
+
+        if not candidate_times and dur > 1.0:
+            candidate_times = [dur * r for r in (0.18, 0.30, 0.44, 0.58, 0.72)]
+        elif not candidate_times:
+            candidate_times = [0.5]
+
+        best_rgb = None
+        best_score = -1.0
+        for ts in candidate_times:
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, ts * 1000.0))
+            ok, bgr = cap.read()
+            if not ok or bgr is None:
+                continue
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            luma = float(gray.mean())
+            std = float(gray.std())
+            if luma < 24.0 or luma > 235.0 or std < 15.0:
+                continue
+            sharp = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            # Penalize frames with baked-in lower-third subtitles/text banners (sharp text artificially spikes Laplacian!)
+            edges = cv2.Canny(gray, 110, 210)
+            fh_g = gray.shape[0]
+            lower_edges = float((edges[int(fh_g * 0.68) :, :] > 0).mean())
+            center_edges = float((edges[int(fh_g * 0.20) : int(fh_g * 0.72), :] > 0).mean())
+            text_penalty = 0.15 if lower_edges > 0.075 else (0.55 if lower_edges > 0.045 else 1.0)
+            # Prefer well-exposed sharp product close-ups in center with clean bottom edge
+            luma_bonus = 1.0 - abs(luma - 128.0) / 140.0
+            score = (sharp * (0.6 + min(1.0, center_edges * 8.0))) * max(0.35, luma_bonus) * text_penalty
+            if score > best_score:
+                best_score = score
+                # If minor bottom caption still exists across all frames, safely crop bottom 14% off the cover shot
+                if lower_edges > 0.065 and fh_g >= 240:
+                    bgr_clean = bgr[: int(bgr.shape[0] * 0.84), :, :]
+                else:
+                    bgr_clean = bgr
+                best_rgb = cv2.cvtColor(bgr_clean, cv2.COLOR_BGR2RGB)
+
+        if best_rgb is not None:
+            return Image.fromarray(best_rgb)
+    finally:
+        cap.release()
+    return None
+
+
+def _paste_rounded_cover_photo(
+    canvas: Image.Image,
+    photo: Image.Image,
+    box: Tuple[int, int, int, int],
+    radius: int = 36,
+    rim_color: Tuple[int, int, int] = (255, 196, 52),
+) -> None:
+    """Crop/fit `photo` strictly into `box=(x0, y0, x1, y1)` with rounded corners and uniform studio rim."""
+    x0, y0, x1, y1 = box
+    bw, bh = x1 - x0, y1 - y0
+    fitted = ImageOps.fit(photo.convert("RGB"), (bw, bh), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+
+    mask = Image.new("L", (bw, bh), 0)
+    md = ImageDraw.Draw(mask)
+    md.rounded_rectangle([0, 0, bw - 1, bh - 1], radius=radius, fill=255)
+
+    # Subtle drop shadow behind the locked SKU frame
+    shadow = Image.new("RGBA", (bw + 16, bh + 16), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle([8, 10, bw + 8, bh + 10], radius=radius, fill=(0, 0, 0, 120))
+    canvas.paste(shadow, (x0 - 8, y0 - 4), shadow)
+
+    canvas.paste(fitted, (x0, y0), mask)
+
+    # Clean gold-accent border so every video cover shares identical framing geometry
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle([x0, y0, x1 - 1, y1 - 1], radius=radius, outline=(*rim_color, 255), width=4)
+
+
+def render_uniform_sku_cover_jpeg(
+    out_jpg_path: Path,
+    sku_photos: List[Image.Image],
+    brand_model_badge: str,
+    price_badge: str,
+    hook_title_vi: str,
+    domain: str = "TECH_DESK",
+) -> Path:
+    """
+    Render a strictly uniform 9:16 (`1080x1920`) studio cover thumbnail for YouTube Shorts & Facebook Reels.
+    Every single video on the channel shares the exact same SKU frame size (`900x820`), header bar,
+    price badge, and bottom 2-line Hook typography — eliminating messy auto-selected frames.
+    """
+    w, h = 1080, 1920
+    canvas = Image.new("RGBA", (w, h), (13, 19, 32, 255))
+    d = ImageDraw.Draw(canvas)
+
+    # 1. Consistent vertical studio gradient (deep navy-slate for TECH_DESK, warm charcoal-slate for HOME_KITCHEN)
+    top_rgb = (16, 25, 44) if domain == "TECH_DESK" else (24, 24, 34)
+    mid_rgb = (26, 39, 64) if domain == "TECH_DESK" else (38, 36, 48)
+    bot_rgb = (10, 14, 24)
+    for row in range(0, h, 4):
+        t = row / float(h)
+        if t < 0.5:
+            u = t * 2.0
+            r = int(top_rgb[0] * (1 - u) + mid_rgb[0] * u)
+            g = int(top_rgb[1] * (1 - u) + mid_rgb[1] * u)
+            b = int(top_rgb[2] * (1 - u) + mid_rgb[2] * u)
+        else:
+            u = (t - 0.5) * 2.0
+            r = int(mid_rgb[0] * (1 - u) + bot_rgb[0] * u)
+            g = int(mid_rgb[1] * (1 - u) + bot_rgb[1] * u)
+            b = int(mid_rgb[2] * (1 - u) + bot_rgb[2] * u)
+        d.rectangle([0, row, w, row + 4], fill=(r, g, b, 255))
+
+    # Top thin gold brand bar
+    d.rectangle([0, 0, w, 10], fill=(255, 196, 52, 255))
+
+    # 2. Fixed Channel Authority Header (`y=52`)
+    f_ch = ImageFont.truetype(FONT_BOLD_PATH, 28)
+    ch_txt = "GÓC REVIEW CHÂN THỰC  •  CHÍNH HÃNG"
+    ch_bb = d.textbbox((0, 0), ch_txt, font=f_ch)
+    d.text(((w - (ch_bb[2] - ch_bb[0])) // 2, 54), ch_txt, font=f_ch, fill=(168, 184, 210, 255))
+
+    # 3. Fixed Top Brand/Model + Price Pill Bar (`y=124..228`)
+    clean_bm = truncate_words_clean(
+        re.sub(r"[^\w\sÀ-ỹ.\-+]", " ", brand_model_badge or "").strip().upper(),
+        max_chars=24,
+    ) or "REVIEW THỰC TẾ"
+    clean_pr = (price_badge or "").strip().upper()[:10]
+
+    f_bm = ImageFont.truetype(FONT_BOLD_PATH, 42)
+    f_pr = ImageFont.truetype(FONT_BOLD_PATH, 42)
+    bm_w = d.textbbox((0, 0), clean_bm, font=f_bm)[2]
+    pr_w = d.textbbox((0, 0), clean_pr, font=f_pr)[2] if clean_pr else 0
+
+    pill_h = 84
+    pill_y0 = 128
+    if clean_pr:
+        gap = 18
+        total_w = (bm_w + 56) + gap + (pr_w + 52)
+        start_x = max(56, (w - total_w) // 2)
+        bm_box = [start_x, pill_y0, start_x + bm_w + 56, pill_y0 + pill_h]
+        pr_box = [bm_box[2] + gap, pill_y0, bm_box[2] + gap + pr_w + 52, pill_y0 + pill_h]
+        d.rounded_rectangle(bm_box, radius=24, fill=(30, 42, 68, 240), outline=(96, 120, 162, 220), width=2)
+        d.text((bm_box[0] + 28, pill_y0 + 18), clean_bm, font=f_bm, fill=(255, 255, 255, 255))
+        d.rounded_rectangle(pr_box, radius=24, fill=(255, 196, 52, 255))
+        d.text((pr_box[0] + 26, pill_y0 + 18), clean_pr, font=f_pr, fill=(18, 22, 34, 255))
+    else:
+        bm_box = [(w - (bm_w + 64)) // 2, pill_y0, (w + (bm_w + 64)) // 2, pill_y0 + pill_h]
+        d.rounded_rectangle(bm_box, radius=24, fill=(30, 42, 68, 240), outline=(255, 196, 52, 220), width=2)
+        d.text((bm_box[0] + 32, pill_y0 + 18), clean_bm, font=f_bm, fill=(255, 255, 255, 255))
+
+    # 4. Fixed-Size Locked SKU Product Showcase Box (`x=90..990, y=266..1116` -> exact 900x850 px!)
+    valid_photos = [p for p in sku_photos if p is not None]
+    if len(valid_photos) >= 2:
+        # Combo 2 SKU: 2 strictly equal stacked frames (900x410 each) + center '+' gold badge
+        _paste_rounded_cover_photo(canvas, valid_photos[0], (90, 266, 990, 676), radius=34)
+        _paste_rounded_cover_photo(canvas, valid_photos[1], (90, 706, 990, 1116), radius=34)
+        cx, cy = 540, 691
+        d.ellipse([cx - 38, cy - 38, cx + 38, cy + 38], fill=(255, 196, 52, 255), outline=(18, 24, 38, 255), width=5)
+        f_plus = ImageFont.truetype(FONT_BOLD_PATH, 54)
+        pb = d.textbbox((0, 0), "+", font=f_plus)
+        d.text((cx - (pb[2] - pb[0]) // 2, cy - (pb[3] - pb[1]) // 2 - 6), "+", font=f_plus, fill=(18, 24, 38, 255))
+    elif len(valid_photos) == 1:
+        _paste_rounded_cover_photo(canvas, valid_photos[0], (90, 266, 990, 1116), radius=38)
+    else:
+        d.rounded_rectangle([90, 266, 990, 1116], radius=38, fill=(28, 38, 58, 255), outline=(255, 196, 52, 255), width=4)
+
+    # 5. Fixed Bottom Bold 2-Line Hook Title (`y=1180..1490`)
+    clean_hook = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%]", "", (hook_title_vi or "").strip()).upper()
+    hook_lines = _wrap_card_text(clean_hook, max_chars_per_line=18, max_lines=2) or ["CÓ ĐÁNG MUA?"]
+    f_hk = ImageFont.truetype(FONT_BOLD_PATH, 78)
+    hk_y = 1205 if len(hook_lines) == 2 else 1255
+    for idx_h, h_ln in enumerate(hook_lines):
+        hb = d.textbbox((0, 0), h_ln, font=f_hk)
+        hx = (w - (hb[2] - hb[0])) // 2
+        fill_col = (255, 255, 255, 255) if idx_h == 0 else (255, 204, 64, 255)
+        # Crisp dark shadow for legibility
+        d.text((hx + 3, hk_y + 4), h_ln, font=f_hk, fill=(0, 0, 0, 210))
+        d.text((hx, hk_y), h_ln, font=f_hk, fill=fill_col)
+        hk_y += 104
+
+    # 6. Fixed Bottom Trust Pill (`y=1475..1545`, safely above YouTube Shorts / FB Reels bottom UI!)
+    trust_txt = "REVIEW THỰC TẾ  •  THÔNG SỐ CHUẨN HÃNG"
+    f_tr = ImageFont.truetype(FONT_BOLD_PATH, 28)
+    tb = d.textbbox((0, 0), trust_txt, font=f_tr)
+    tw = tb[2] - tb[0]
+    tx0 = (w - (tw + 64)) // 2
+    d.rounded_rectangle([tx0, 1480, tx0 + tw + 64, 1546], radius=20, fill=(32, 46, 72, 235), outline=(88, 112, 154, 220), width=2)
+    d.text((tx0 + 32, 1496), trust_txt, font=f_tr, fill=(224, 232, 246, 255))
+
+    out_jpg_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_jpg = out_jpg_path.with_suffix(".tmp.jpg")
+    canvas.convert("RGB").save(tmp_jpg, format="JPEG", quality=90, optimize=True)
+    tmp_jpg.replace(out_jpg_path)
+    return out_jpg_path
 
 
 def _render_pil_score_verdict_card(
@@ -820,6 +1047,9 @@ class M4VideoProducerEngine:
                     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
                     edges = cv2.Canny(gray, 110, 210)
                     edge_density = float((edges > 0).mean())
+                    # Detect baked-in subtitles / promotional text banners in lower-third or center band
+                    lower_band = edges[int(small_h * 0.65) :, :]
+                    lower_edge_density = float((lower_band > 0).mean()) if lower_band.size > 0 else 0.0
 
                     in_verified_clean = any(a <= cur_t <= b for a, b in verified_intervals)
                     if verified_intervals:
@@ -830,7 +1060,8 @@ class M4VideoProducerEngine:
                             mean_luma < 20.0
                             or mean_luma > 232.0
                             or std_luma < 16.0
-                            or edge_density > 0.135
+                            or edge_density > 0.115
+                            or lower_edge_density > 0.125
                         )
                         has_face = max_face_ratio > 0.022
 
@@ -1362,8 +1593,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,Arial,36,&H00FFFFFF,&H000000FF,&H00101010,&H99000000,-1,0,0,0,100,100,0.3,0,1,3.0,1.2,5,70,70,0,1
-Style: Hook,Arial,64,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,0.5,0,1,4.0,2.0,5,60,60,0,1
+Style: Sub,Arial,44,&H00FFFFFF,&H000000FF,&H000E1118,&HAA000000,-1,0,0,0,100,100,0.4,0,1,4.2,2.4,5,64,64,0,1
+Style: Hook,Arial,68,&H00FFFFFF,&H000000FF,&H000E1118,&H00000000,-1,0,0,0,100,100,0.5,0,1,4.5,2.4,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1930,11 +2161,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"{c.brand} {c.model_code or ''}".strip() for c in script.verified_factual_claims[:2]
             )
             spec_lines = [
-                f"{c.brand} {c.model_code or ''}: ~{c.claimed_price_vnd // 1000}k"
+                f"{c.brand} {c.model_code or ''}: ~{format_vnd_short(c.claimed_price_vnd)}"
                 for c in script.verified_factual_claims[:3]
             ]
-            total_price_k = sum(c.claimed_price_vnd for c in script.verified_factual_claims) // 1000
-            price_str = f"~{total_price_k:,}k".replace(",", ".")
+            total_price_vnd = sum(c.claimed_price_vnd for c in script.verified_factual_claims)
+            price_str = f"~{format_vnd_short(total_price_vnd)}"
             caveat_lines = _wrap_card_text(
                 "; ".join(c.mandatory_caveat_mentioned_vi for c in script.verified_factual_claims[:2]),
                 max_chars_per_line=38,
@@ -1942,14 +2173,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
         elif primary_claim:
             spec_title = f"{primary_claim.brand} {primary_claim.model_code or ''}".strip()
-            spec_lines = [s[:40] for s in primary_claim.claimed_specs_mentioned[:3]] or ["Chính hãng kiểm chứng"]
-            price_k = max(1, primary_claim.claimed_price_vnd // 1000)
-            price_str = f"~{price_k:,}k".replace(",", ".")
+            spec_lines = [
+                truncate_words_clean(s, max_chars=40) for s in primary_claim.claimed_specs_mentioned[:3]
+            ] or ["Chính hãng kiểm chứng"]
+            price_str = f"~{format_vnd_short(primary_claim.claimed_price_vnd)}"
             caveat_lines = _wrap_card_text(
                 primary_claim.mandatory_caveat_mentioned_vi, max_chars_per_line=38, max_lines=3
             )
         else:
-            spec_title = script.title_vi[:26]
+            spec_title = truncate_words_clean(script.title_vi, max_chars=26)
             spec_lines = ["Thông số chuẩn nhà sản xuất"]
             price_str = "Chính hãng"
             caveat_lines = ["Xem kỹ lưu ý trước khi mua"]
@@ -2143,6 +2375,43 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             raise RuntimeError(f"Rendered video failed integrity probe: {info}")
         final_out.parent.mkdir(parents=True, exist_ok=True)
         tmp_final_out.replace(final_out)
+
+        # Generate uniform 9:16 SKU cover thumbnail (`<script_id>_cover.jpg`) for YouTube Shorts & Facebook Reels
+        try:
+            cover_photos: List[Image.Image] = []
+            for claim in (script.verified_factual_claims or [])[:2]:
+                sku_k = normalize_sku_key(claim.brand, claim.model_code, claim.candidate_id)
+                manual_photo: Optional[Image.Image] = None
+                for ext in (".jpg", ".jpeg", ".png", ".webp"):
+                    mp = SKU_THUMBS_DIR / f"{sku_k}{ext}"
+                    if mp.exists():
+                        manual_photo = Image.open(mp).convert("RGB")
+                        break
+                if manual_photo is not None:
+                    cover_photos.append(manual_photo)
+                else:
+                    pool_for_sku = cand_to_summaries.get(claim.candidate_id) or summary_list
+                    for cand_sum in pool_for_sku:
+                        best_im = _extract_best_sku_frame_pil(cand_sum.path, cand_sum.samples)
+                        if best_im is not None:
+                            cover_photos.append(best_im)
+                            break
+            if not cover_photos and summary_list:
+                fb_im = _extract_best_sku_frame_pil(summary_list[0].path, summary_list[0].samples)
+                if fb_im is not None:
+                    cover_photos.append(fb_im)
+            cover_out_jpg = final_out.with_name(f"{script.script_id}_cover.jpg")
+            render_uniform_sku_cover_jpeg(
+                out_jpg_path=cover_out_jpg,
+                sku_photos=cover_photos,
+                brand_model_badge=spec_title,
+                price_badge=price_str,
+                hook_title_vi=hook_short,
+                domain=script.domain,
+            )
+            print(f"[M4.4] Generated uniform 9:16 SKU cover -> {cover_out_jpg.name}", flush=True)
+        except Exception as cov_exc:
+            print(f"[M4.4] Cover thumbnail generation warning (non-fatal): {cov_exc}", flush=True)
 
         # Immediately reclaim scratch WAV/MP4 work space now that final MP4 is atomically saved
         StorageGarbageCollector().cleanup_completed_work_dir(seg_dir)
