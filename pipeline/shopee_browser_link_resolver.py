@@ -128,9 +128,14 @@ def build_shopee_mall_search_an_redir_link(
     via `https://s.shopee.vn/an_redir`.
     Returns `(origin_mall_search_url, s_shopee_vn_mall_affiliate_link)`.
     """
-    clean_brand = (brand or "").strip()
-    clean_model = (model_code or "").replace("-Series", "").replace("Series", "").strip()
-    if clean_brand and clean_model and clean_model.lower() != "general":
+    clean_brand = re.sub(r"\s+", " ", (brand or "").replace("_", " ")).strip()
+    clean_model = re.sub(r"[_]+", " ", (model_code or ""))
+    clean_model = re.sub(r"\b(?:series|general)\b", "", clean_model, flags=re.IGNORECASE)
+    clean_model = re.sub(r"\s+", " ", clean_model).strip(" -")
+    # Avoid duplicating brand if model_code already starts with brand
+    if clean_brand and clean_model and clean_model.lower().startswith(clean_brand.lower()):
+        kw = clean_model
+    elif clean_brand and clean_model:
         kw = f"{clean_brand} {clean_model}".strip()
     elif clean_brand:
         short_func = " ".join((product_name_vi or "").split()[:4])
@@ -304,7 +309,9 @@ class ShopeeAutoAffiliateResolver:
         """
         brand_wl = get_brand_whitelist_entry(brand, self.whitelist_data)
         official_shop_ids: set[str] = set(brand_wl.get("official_shop_ids") or []) if brand_wl else set()
-        prefer_mall = bool(brand_wl.get("prefer_mall_search", True)) if brand_wl else True
+        # Only restrict to `/mall/search` when the brand is explicitly verified as Shopee Mall in whitelist!
+        # Otherwise use `/search?keyword=...` so users always land on real SKU listings (never empty Mall search).
+        prefer_mall = bool(brand_wl.get("prefer_mall_search", False)) if brand_wl else False
         verified_sku_map = (brand_wl.get("verified_sku_items") or {}) if brand_wl else {}
 
         # Always build the never-out-of-stock Shopee Mall Search Affiliate Link
@@ -344,7 +351,7 @@ class ShopeeAutoAffiliateResolver:
 
         # Step 2: Open-web search restricted strictly to `official_shop_ids`
         if official_shop_ids:
-            clean_model = (model_code or "").replace("-Series", "").replace("Series", "").strip()
+            clean_model = re.sub(r"[_]+", " ", (model_code or "")).replace("-Series", "").replace("Series", "").strip()
             short_func = " ".join((product_name_vi or "").split()[:4])
             queries = [
                 f"site:shopee.vn {brand} {clean_model}".strip(),

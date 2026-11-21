@@ -166,13 +166,17 @@ def _format_mm_ss(seconds: float) -> str:
 
 def _build_shopee_search_urls(brand: str, model_code: Optional[str], product_name_vi: str) -> tuple[str, str, str]:
     """Build clean search keyword + Shopee Mall & Shopee All search URLs for 1-click product lookup."""
-    clean_brand = (brand or "").strip()
-    clean_model = (model_code or "").strip()
-    if clean_brand and clean_model and clean_model.lower() not in ("series", "general"):
+    clean_brand = re.sub(r"\s+", " ", (brand or "").replace("_", " ")).strip()
+    clean_model = re.sub(r"[_]+", " ", (model_code or ""))
+    clean_model = re.sub(r"\b(?:series|general)\b", "", clean_model, flags=re.IGNORECASE)
+    clean_model = re.sub(r"\s+", " ", clean_model).strip(" -")
+    if clean_brand and clean_model and clean_model.lower().startswith(clean_brand.lower()):
+        kw = clean_model
+    elif clean_brand and clean_model:
         kw = f"{clean_brand} {clean_model}"
     elif clean_brand:
-        short_name = " ".join((product_name_vi or "").split()[:5])
-        kw = f"{clean_brand} {short_name}".strip()
+        short_func = " ".join((product_name_vi or "").split()[:5])
+        kw = f"{clean_brand} {short_func}".strip()
     else:
         kw = (product_name_vi or "gia dụng chính hãng").strip()
 
@@ -404,13 +408,19 @@ class PublishPackager:
 
         if not mall_search_aff_link:
             try:
-                from pipeline.shopee_browser_link_resolver import build_shopee_mall_search_an_redir_link
+                from pipeline.shopee_browser_link_resolver import (
+                    build_shopee_mall_search_an_redir_link,
+                    get_brand_whitelist_entry,
+                )
 
+                b_wl = get_brand_whitelist_entry(brand)
+                use_mall = bool(b_wl.get("prefer_mall_search", False)) if b_wl else False
                 _, mall_search_aff_link = build_shopee_mall_search_an_redir_link(
                     brand=brand,
                     model_code=model_code,
                     product_name_vi=product_name_vi,
                     sub_id=f"{sku_key}_mall",
+                    prefer_mall=use_mall,
                 )
             except Exception:
                 pass
