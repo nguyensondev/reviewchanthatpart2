@@ -52,6 +52,15 @@ MANDATORY_VI_DIACRITIC_RULE = (
 )
 
 
+MIXED_EN_PRODUCT_FIELDS = {
+    "product_name_vi",
+    "specific_youtube_search_query_vi",
+    "generic_web_queries_vi",
+    "generic_youtube_queries_vi",
+    "key_specs_pairs",
+}
+
+
 def _validate_pydantic_vietnamese_fields(obj: object, path_prefix: str = "") -> List[str]:
     """
     Recursively inspect every `*_vi` string/list field in a parsed Pydantic response.
@@ -63,14 +72,19 @@ def _validate_pydantic_vietnamese_fields(obj: object, path_prefix: str = "") -> 
             val = getattr(obj, fname, None)
             sub_path = f"{path_prefix}.{fname}" if path_prefix else fname
             if fname.endswith("_vi") or fname in ("key_specs_pairs",):
+                allow_en = fname in MIXED_EN_PRODUCT_FIELDS
                 if isinstance(val, str) and val.strip():
-                    ok, _, reason = check_vietnamese_diacritics(val)
+                    ok, _, reason = check_vietnamese_diacritics(
+                        val, allow_english_product_names=allow_en
+                    )
                     if not ok:
                         violations.append(f"{sub_path}: {reason} -> {val[:80]!r}")
                 elif isinstance(val, list):
                     for idx, item in enumerate(val):
                         if isinstance(item, str) and item.strip():
-                            ok, _, reason = check_vietnamese_diacritics(item)
+                            ok, _, reason = check_vietnamese_diacritics(
+                                item, allow_english_product_names=allow_en
+                            )
                             if not ok:
                                 violations.append(f"{sub_path}[{idx}]: {reason} -> {item[:80]!r}")
                         else:

@@ -64,6 +64,17 @@ _KNOWN_ASCII_TECH_BRAND_TOKENS: set[str] = {
     "reels", "tiktok", "youtube", "facebook", "shopee", "mall", "shop", "link", "bio",
     "ok", "model", "size", "mini", "pro", "max", "plus", "ultra", "air", "auto", "smart",
     "touch", "sensor", "timer", "mode", "app", "full", "hd", "uhd", "fps", "hz", "cri", "ra", "format",
+    # Common English product/model nouns embedded inside Vietnamese product titles & specs
+    "mi", "yeelight", "lumias", "levoit", "sharp", "jisulife", "philips", "midea", "simplus",
+    "computer", "monitor", "light", "bar", "screen", "desk", "desktop", "laptop", "stand",
+    "wireless", "ergonomic", "vertical", "mouse", "keyboard", "mechanical", "low", "profile",
+    "switch", "silent", "custom", "qmk", "via", "charger", "station", "power", "adapter",
+    "cable", "magnetic", "retractable", "hub", "dock", "docking", "arm", "mount", "vesa",
+    "purifier", "hepa", "filter", "compact", "dehumidifier", "humidifier", "dryer", "fan",
+    "portable", "rechargeable", "vacuum", "sealer", "cleaner", "duster", "blower",
+    "scale", "kitchen", "digital", "thermometer", "probe", "kettle", "gooseneck",
+    "grinder", "burr", "frother", "milk", "sprayer", "oil", "mist", "bottle", "dispenser",
+    "soap", "foam", "touchless", "chopper", "garlic", "series", "lite", "gen", "edition",
 }
 
 
@@ -71,6 +82,7 @@ def check_vietnamese_diacritics(
     text: str,
     min_words_for_ratio: int = 4,
     min_accent_ratio: float = 0.40,
+    allow_english_product_names: bool = False,
 ) -> Tuple[bool, float, str]:
     """
     Strictly verify that `text` is written in proper accented UTF-8 Vietnamese (tiếng Việt có dấu đầy đủ).
@@ -125,6 +137,18 @@ def check_vietnamese_diacritics(
         return True, 1.0, ""
 
     ratio = round(accented_count / len(vi_eval_tokens), 3)
+
+    if allow_english_product_names:
+        # For mixed VN + English model names / search queries:
+        # forbidden unaccented Vietnamese words were already blocked above;
+        # require at least 1 accented Vietnamese character if >= 3 non-brand tokens exist
+        if len(vi_eval_tokens) >= 3 and accented_count == 0:
+            return (
+                False,
+                0.0,
+                f"Chuỗi ({len(vi_eval_tokens)} từ) hoàn toàn không có dấu tiếng Việt",
+            )
+        return True, ratio, ""
 
     if (max_consecutive_unaccented >= 6 and ratio < 0.65) or max_consecutive_unaccented >= 9:
         return (
