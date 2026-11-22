@@ -395,20 +395,26 @@ class PipelineHealthInspector:
                         if not vp.exists():
                             findings.append(f"[M4 Thiếu MP4] {sid} ở trạng thái RENDERED nhưng không thấy file {vp.name}")
 
-        # 4. Scan Launchd stderr & stdout logs (last 150 lines)
+        # 4. Scan Launchd stderr & stdout logs (last 150 lines, ONLY if modified within the last 6 hours)
         err_markers = ("traceback (most recent call last)", "runtimeerror:", "httperror", "http 401", "http 403", "critical", "exception:")
+        now_ts = time.time()
         for log_name in ("launchd_stderr.log", "launchd_stdout.log"):
             log_path = LOGS_DIR / log_name
             if not log_path.exists():
                 continue
             try:
+                mtime = log_path.stat().st_mtime
+                if (now_ts - mtime) > 6 * 3600:
+                    continue
+                mtime_str = dt.datetime.fromtimestamp(mtime).astimezone().strftime("%d/%m %H:%M")
                 tail_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-150:]
                 for ln in tail_lines:
                     low = ln.lower()
                     if any(m in low for m in err_markers):
                         clean_ln = ln.strip()[:160]
-                        if clean_ln and clean_ln not in findings:
-                            findings.append(f"[{log_name}] {clean_ln}")
+                        entry_str = f"[{log_name} • {mtime_str}] {clean_ln}"
+                        if clean_ln and entry_str not in findings:
+                            findings.append(entry_str)
             except Exception:
                 pass
 
@@ -621,6 +627,17 @@ class TelegramHealthBot:
         pull_rc, pull_out = _git_cmd(["pull", "origin", "main"], timeout_s=45.0)
         _, new_sha = _git_cmd(["rev-parse", "--short", "HEAD"], timeout_s=10.0)
         _, commit_subject = _git_cmd(["log", "-1", "--pretty=%s"], timeout_s=10.0)
+
+        # Archive & clear stale launchd_stderr.log after a successful code update so old fixed errors don't re-alert
+        if pull_rc == 0:
+            try:
+                stderr_log = LOGS_DIR / "launchd_stderr.log"
+                if stderr_log.exists() and stderr_log.stat().st_size > 0:
+                    prev_log = LOGS_DIR / "launchd_stderr.prev.log"
+                    prev_log.write_bytes(stderr_log.read_bytes())
+                    stderr_log.write_text("", encoding="utf-8")
+            except Exception:
+                pass
 
         qaqc_rc = 0
         qaqc_tail = ""
