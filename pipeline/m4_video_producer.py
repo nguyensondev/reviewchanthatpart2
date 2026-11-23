@@ -40,6 +40,7 @@ import ssl
 import subprocess
 import time
 import urllib.request
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
@@ -102,6 +103,21 @@ _SSL_CTX = ssl.create_default_context(cafile=_CA_BUNDLE_PATH) if _CA_BUNDLE_PATH
 MAX_CONTINUOUS_SHOT_SEC = 3.6
 
 TIKTOK_TTS_API_URL = "https://ottsy.weilbyte.dev/api/generation"
+GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+GEMINI_VOICE_MAP: Dict[str, Tuple[str, str]] = {
+    "gemini_aoede": (
+        "Aoede",
+        "Đọc bằng giọng nữ tiếng Việt tự nhiên, ấm áp, dễ nghe như người bạn chia sẻ kinh nghiệm mua đồ thật. "
+        "Không tạo tiếng hít thở lớn hay tiếng lấy hơi rõ, phát âm tròn vành rõ chữ, ngắt nghỉ tự nhiên đúng dấu câu:\n",
+    ),
+    "gemini_puck": (
+        "Puck",
+        "Đọc bằng giọng nam reviewer công nghệ tiếng Việt trẻ trung, trầm ấm, gần gũi và điềm đạm dễ nghe. "
+        "Không tạo tiếng hít thở lớn hay tiếng lấy hơi rõ, phát âm chuẩn tiếng Việt, ngắt nghỉ tự nhiên đúng dấu câu:\n",
+    ),
+}
+# Primary pool combines Gemini 2.5 Flash TTS (Aoede/Puck) + TikTok TTS (BV074/BV075) randomly per gender;
+# Microsoft Edge Neural TTS (vi-VN-HoaiMyNeural / vi-VN-NamMinhNeural) serves as fallback.
 VOICE_POOL: List[Tuple[str, Literal["FEMALE", "MALE"], str]] = [
     ("BV074_streaming", "FEMALE", "vi-VN-HoaiMyNeural"),
     ("BV075_streaming", "MALE", "vi-VN-NamMinhNeural"),
@@ -355,8 +371,8 @@ def _choose_voice_for_video(
     if preferred_voice == "BV074_streaming":
         return [VOICE_POOL[0], VOICE_POOL[1]]
 
-    female_cnt = sum(1 for v in voices_used_today if v in ("BV074_streaming", "vi-VN-HoaiMyNeural"))
-    male_cnt = sum(1 for v in voices_used_today if v in ("BV075_streaming", "vi-VN-NamMinhNeural"))
+    female_cnt = sum(1 for v in voices_used_today if v in ("gemini_aoede", "BV074_streaming", "vi-VN-HoaiMyNeural"))
+    male_cnt = sum(1 for v in voices_used_today if v in ("gemini_puck", "BV075_streaming", "vi-VN-NamMinhNeural"))
 
     if female_cnt > male_cnt:
         return [VOICE_POOL[1], VOICE_POOL[0]]
@@ -1336,6 +1352,7 @@ class M4VideoProducerEngine:
         out_mp3: Path,
         out_wav: Path,
         locked_voice: str,
+        is_first_clause: bool = False,
     ) -> float:
         """Step M4.3: Synthesize one clause using ONLY `locked_voice` (strict 1-voice-per-video lock)."""
         if out_wav.exists() and out_wav.stat().st_size > 1000:
@@ -1348,16 +1365,97 @@ class M4VideoProducerEngine:
             # For comma-split clauses, leave comma or short breath; for full sentences, close with '.'
             clean_text += "," if is_comma_pause else "."
         pad_dur_sec = 0.06 if is_comma_pause else 0.12
+        lead_delay_prefix = "adelay=300|300," if is_first_clause else ""
 
         tmp_mp3 = out_mp3.with_suffix(".tmp.mp3")
         tmp_mp3.unlink(missing_ok=True)
         atempo_prefix = ""
         provider_alive = getattr(self, "_tts_provider_alive", None)
         if provider_alive is None:
-            provider_alive = {"tiktok": True, "edge": True}
+            provider_alive = {"gemini_tts": True, "tiktok": True, "edge": True}
             self._tts_provider_alive = provider_alive
 
         synth_done = False
+
+        if locked_voice in GEMINI_VOICE_MAP:
+            if not provider_alive.get("gemini_tts", True):
+                raise RuntimeError("Gemini TTS marked unavailable for this run; switching to TikTok/Edge TTS.")
+            g_voice_name, g_style_prompt = GEMINI_VOICE_MAP[locked_voice]
+            raw_gemini_wav = out_mp3.with_suffix(".gemini_raw.wav")
+            raw_gemini_wav.unlink(missing_ok=True)
+            try:
+                def _call_gemini_tts() -> bytes:
+                    from dotenv import load_dotenv
+                    from google import genai
+                    from google.genai import types
+
+                    load_dotenv()
+                    api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+                    if not api_key:
+                        raise RuntimeError("Missing GEMINI_API_KEY for Gemini 2.5 Flash TTS")
+                    g_client = getattr(self, "_gemini_tts_client", None)
+                    if g_client is None:
+                        g_client = genai.Client(api_key=api_key)
+                        self._gemini_tts_client = g_client
+                    resp = g_client.models.generate_content(
+                        model=GEMINI_TTS_MODEL,
+                        contents=g_style_prompt + clean_text,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["AUDIO"],
+                            speech_config=types.SpeechConfig(
+                                voice_config=types.VoiceConfig(
+                                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=g_voice_name)
+                                )
+                            ),
+                        ),
+                    )
+                    pcm_bytes = resp.candidates[0].content.parts[0].inline_data.data
+                    if not pcm_bytes or len(pcm_bytes) < 2000:
+                        raise RuntimeError("Gemini TTS returned empty PCM audio")
+                    return pcm_bytes
+
+                pcm_data = await asyncio.to_thread(_call_gemini_tts)
+                with wave.open(str(raw_gemini_wav), "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(24000)
+                    wf.writeframes(pcm_data)
+
+                # Studio de-breath gate + warm vocal EQ + crisp Shorts pacing (1.06x) + 0.30s opening cushion
+                _run_cmd(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(raw_gemini_wav),
+                        "-af",
+                        "highpass=f=95,"
+                        "agate=threshold=0.028:ratio=5:attack=12:release=140:knee=4,"
+                        "atempo=1.06,"
+                        "equalizer=f=3000:t=q:w=1.2:g=1.2,"
+                        "equalizer=f=7000:t=q:w=1.5:g=-2.0,"
+                        "silenceremove=start_periods=1:start_silence=0.03:start_threshold=-42dB,"
+                        "areverse,silenceremove=start_periods=1:start_silence=0.05:start_threshold=-42dB,"
+                        f"areverse,{lead_delay_prefix}apad=pad_dur={pad_dur_sec:.2f}",
+                        "-ar",
+                        "44100",
+                        "-ac",
+                        "2",
+                        str(out_wav),
+                    ]
+                )
+                raw_gemini_wav.unlink(missing_ok=True)
+                await asyncio.sleep(1.1)
+                return _get_audio_duration(out_wav)
+            except Exception as exc:
+                raw_gemini_wav.unlink(missing_ok=True)
+                provider_alive["gemini_tts"] = False
+                print(
+                    f"  [M4.3 TTS] Gemini 2.5 Flash TTS '{locked_voice}' unavailable ({exc}); "
+                    f"switching cleanly to TikTok/Edge Neural TTS.",
+                    flush=True,
+                )
+                raise RuntimeError(f"Gemini TTS failed ({exc})") from exc
 
         if locked_voice in ("BV074_streaming", "BV075_streaming"):
             if not provider_alive.get("tiktok", True):
@@ -1559,7 +1657,7 @@ class M4VideoProducerEngine:
                 "-af",
                 f"{atempo_prefix}silenceremove=start_periods=1:start_silence=0.03:start_threshold=-45dB,"
                 "areverse,silenceremove=start_periods=1:start_silence=0.05:start_threshold=-45dB,"
-                f"areverse,apad=pad_dur={pad_dur_sec:.2f}",
+                f"areverse,{lead_delay_prefix}apad=pad_dur={pad_dur_sec:.2f}",
                 "-ar",
                 "44100",
                 "-ac",
@@ -1949,10 +2047,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         voice_candidates = _choose_voice_for_video(voices_used_today, preferred_voice=preferred_voice)
         ordered_voice_attempts: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
+        edge_fallbacks: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
         for primary_tiktok_voice, gender, fallback_edge in voice_candidates:
-            ordered_voice_attempts.append((primary_tiktok_voice, gender))
-            ordered_voice_attempts.append((fallback_edge, gender))
-        # Last-resort emergency fallback only if both TikTok & Edge Neural TTS are completely unreachable
+            gemini_voice = "gemini_aoede" if gender == "FEMALE" else "gemini_puck"
+            # Randomly rotate within the primary pool (Gemini 2.5 Flash TTS + TikTok TTS), avoiding repeating last voice
+            primary_pair = [gemini_voice, primary_tiktok_voice]
+            if voices_used_today and voices_used_today[-1] == primary_pair[0]:
+                primary_pair.reverse()
+            elif not voices_used_today or voices_used_today[-1] != primary_pair[1]:
+                random.shuffle(primary_pair)
+            for pv in primary_pair:
+                ordered_voice_attempts.append((pv, gender))
+            edge_fallbacks.append((fallback_edge, gender))
+        # Fallback tier: Microsoft Edge Neural TTS, then emergency Google TTS only if all neural engines fail
+        ordered_voice_attempts.extend(edge_fallbacks)
         ordered_voice_attempts.append(("google_female", "FEMALE"))
 
         sem = asyncio.Semaphore(1)
@@ -1972,6 +2080,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                             mp3_p,
                             wav_p,
                             locked_voice=candidate_voice,
+                            is_first_clause=(c_idx == 1),
                         )
                         candidate_map[c_idx] = (dur, wav_p)
                 tts_map = candidate_map
@@ -2287,7 +2396,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         fade_out_st = max(0.0, total_dur - 1.5)
         a_fc = [
-            "[4:a]aresample=44100,volume=1.05,asplit=2[vo][vsc]",
+            "[4:a]aresample=44100,afade=t=in:st=0.30:d=1.8:curve=tri,volume=0.88,asplit=2[vo][vsc]",
             f"[5:a]aresample=44100,atrim=0:{total_dur:.3f},afade=t=in:d=0.8,"
             f"afade=t=out:st={fade_out_st:.3f}:d=1.5,volume=0.22[bgm]",
             "[bgm][vsc]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[duck]",
@@ -2307,7 +2416,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         a_fc.append(
             f"[vo][duck]{''.join(sfx_labels)}amix=inputs={2 + len(sfx_labels)}:normalize=0:duration=first,"
             f"apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f},"
-            f"loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
+            f"loudnorm=I=-15.5:TP=-1.5:LRA=10[aout]"
         )
 
         final_out = self.output_dir / f"{script.script_id}.mp4"
