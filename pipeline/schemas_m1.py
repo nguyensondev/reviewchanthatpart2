@@ -91,6 +91,7 @@ class RejectedFoilSKU(BaseModel):
         "MULTI_MODEL_AMBIGUOUS",
         "INSUFFICIENT_VIDEO_EVIDENCE",
         "NO_CLEAN_OFFICIAL_FOOTAGE",
+        "RECENT_BRAND_CATEGORY_SIBLING",
         "LOW_TIER_OEM_FOIL",
     ] = Field(..., description="Lý do chính khiến mẫu này bị đưa vào nhóm đối chứng nên tránh")
     rejection_reason_vi: str = Field(

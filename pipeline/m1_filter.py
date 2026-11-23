@@ -28,6 +28,7 @@ from typing import Dict, List, Optional, Tuple
 from pipeline.brand_video_gate import OfficialBrandVideoGate
 from pipeline.core_resilience import atomic_write_text
 from pipeline.llm_client import FreeTierGeminiClient
+from pipeline.sku_registry import SKURegistryManager
 from pipeline.schemas_m0 import (
     AffiliateListingMatch,
     DiscoveredCandidateSKU,
@@ -238,6 +239,7 @@ class M1SmartFilterEngine:
     def __init__(self, llm_client: Optional[FreeTierGeminiClient] = None) -> None:
         self.llm = llm_client or FreeTierGeminiClient()
         self.brand_gate = OfficialBrandVideoGate()
+        self.sku_registry = SKURegistryManager()
 
     def _filter_and_score_category(
         self, cat: FunctionalCategoryGroup
@@ -301,6 +303,26 @@ class M1SmartFilterEngine:
                         honest_caveat_vi=cand.honest_caveat_vi,
                         rejection_gate="INSUFFICIENT_VIDEO_EVIDENCE",
                         rejection_reason_vi="Không tìm thấy video thực tế trên YouTube để kiểm chứng chất lượng và làm tư liệu hình ảnh.",
+                    )
+                )
+            elif cand.archetype != "OEM_GENERIC" and self.sku_registry.is_brand_category_recently_covered(
+                cand.brand, cat.category_id, within_days=30
+            ):
+                rejected_foils.append(
+                    RejectedFoilSKU(
+                        candidate_id=cand.candidate_id,
+                        brand=cand.brand,
+                        model_code=cand.model_code,
+                        product_name_vi=cand.product_name_vi,
+                        archetype=cand.archetype,
+                        estimated_market_price_vnd=cand.estimated_market_price_vnd,
+                        caveat_severity=cand.caveat_severity,
+                        honest_caveat_vi=cand.honest_caveat_vi,
+                        rejection_gate="RECENT_BRAND_CATEGORY_SIBLING",
+                        rejection_reason_vi=(
+                            f"Bị loại để tránh lặp biến thể cùng hãng '{cand.brand}' trong nhóm '{cat.category_id}' "
+                            "(hãng này đã lên sóng trong vòng 30 ngày qua)."
+                        ),
                     )
                 )
             elif cand.archetype != "OEM_GENERIC" and len(official_clips) == 0:

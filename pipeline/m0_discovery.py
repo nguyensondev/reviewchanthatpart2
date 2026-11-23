@@ -776,17 +776,17 @@ class M0AutonomousDiscoveryEngine:
             for item in CATEGORY_ROTATION_TAXONOMY
             if item["domain"] == "KITCHEN_TECH" and item["category_id"] not in blocked_ids
         ]
-        # If nearly all 18 categories have been explored, keep only active 3-7d cooldowns blocked
+        # If nearly all 18+ categories have been explored within 14d, fall back to oldest-used categories
+        # so the pipeline rotates cleanly without ever deadlocking or repeating yesterday's category
+        recent_cat_ts = self.sku_registry.get_recent_categories(within_days=14)
         if not fresh_tech:
-            cd_set = {self._resolve_canonical_category_id(c) for c in reg_blocks.get("cooldown_categories", [])}
-            fresh_tech = [
-                item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "TECH_DESK" and item["category_id"] not in cd_set
-            ] or [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "TECH_DESK"]
+            tech_all = [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "TECH_DESK"]
+            tech_all.sort(key=lambda it: recent_cat_ts.get(it["category_id"], ""))
+            fresh_tech = tech_all[: max(2, len(tech_all) // 2)]
         if not fresh_kitchen:
-            cd_set = {self._resolve_canonical_category_id(c) for c in reg_blocks.get("cooldown_categories", [])}
-            fresh_kitchen = [
-                item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "KITCHEN_TECH" and item["category_id"] not in cd_set
-            ] or [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "KITCHEN_TECH"]
+            kit_all = [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "KITCHEN_TECH"]
+            kit_all.sort(key=lambda it: recent_cat_ts.get(it["category_id"], ""))
+            fresh_kitchen = kit_all[: max(2, len(kit_all) // 2)]
 
         return blocked_ids, fresh_tech, fresh_kitchen
 
@@ -1018,10 +1018,22 @@ Mỗi nhóm công năng phải có:
             "5. BẮT BUỘC 100% TIẾNG VIỆT CÓ DẤU ĐẦY ĐỦ CHUẨN UTF-8: Kể cả khi tiêu đề trên sàn TMĐT / YouTube viết không dấu, bạn BẮT BUỘC phải chuyển hóa `product_name_vi`, `key_specs_pairs`, `highlight_pros_vi`, `honest_caveat_vi` sang tiếng Việt CÓ DẤU ĐẦY ĐỦ."
         )
 
+        blocked_brands_30d = self.sku_registry.get_recent_brand_categories(within_days=30).get(
+            cat_plan.category_id, []
+        )
+        anti_sibling_brand_rule = (
+            f"\n⚠️ CẤM CHỌN BIẾN THỂ CÙNG HÃNG ĐÃ LÊN SÓNG TRONG 30 NGÀY QUA Ở NHÓM `{cat_plan.category_id}`: "
+            f"{', '.join(b.upper() for b in blocked_brands_30d)} "
+            "(VD đã làm Baseus i-wok2 thì CẤM chọn Baseus i-Wok Pro / Lite; hãy chọn các hãng đối thủ khác!).\n"
+            if blocked_brands_30d
+            else ""
+        )
+
         prompt = f"""
 Chủ đề gốc: `{domain}`
 Nhóm công năng đang phân tích: `{cat_plan.category_id}` — **{cat_plan.category_name_vi}**
 Vấn đề giải quyết: {cat_plan.problem_solved_vi}
+{anti_sibling_brand_rule}
 
 === DỮ LIỆU THU THẬP TỪ OPEN WEB ===
 {web_text}

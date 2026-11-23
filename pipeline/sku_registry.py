@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import random
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -199,12 +200,110 @@ class SKURegistryManager:
             return False
         return True
 
+    def get_recent_categories(
+        self,
+        within_days: int = 14,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, str]:
+        """
+        Return `{category_id: latest_iso}` for every category that had a rendered/published video
+        within `within_days` (default 14 days), combining `sku_registry.json` and `video_registry.json`.
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        cutoff = now_dt - dt.timedelta(days=max(1, int(within_days)))
+        recent: Dict[str, str] = {}
+
+        def _consider(cat_id: str, ts_iso: Optional[str]) -> None:
+            if not cat_id or not ts_iso:
+                return
+            try:
+                ts_dt = dt.datetime.fromisoformat(str(ts_iso))
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=now_dt.tzinfo)
+                if ts_dt >= cutoff:
+                    prev = recent.get(cat_id)
+                    if not prev or ts_iso > prev:
+                        recent[cat_id] = str(ts_iso)
+            except Exception:
+                pass
+
+        for e in self.get_all_entries().values():
+            if e.has_solo_video or e.has_combo_video or e.last_rendered_at:
+                _consider(e.category_id, e.last_rendered_at or e.updated_at)
+
+        # Also cross-check video_registry.json (read-only) for RENDERED/PUBLISHED videos
+        vreg_path = self.registry_path.parent / "video_registry.json"
+        if vreg_path.exists():
+            try:
+                vdata = safe_load_json(vreg_path, lambda: {})
+                vitems = vdata.get("items") or vdata.get("entries") or vdata.get("videos") or {}
+                if isinstance(vitems, dict):
+                    for ve in vitems.values():
+                        if isinstance(ve, dict) and ve.get("status") in ("RENDERED", "PUBLISHED"):
+                            _consider(
+                                str(ve.get("category_id") or ""),
+                                str(ve.get("published_at") or ve.get("rendered_at") or ve.get("updated_at") or ""),
+                            )
+            except Exception:
+                pass
+        return recent
+
+    def get_recent_brand_categories(
+        self,
+        within_days: int = 30,
+        now: Optional[dt.datetime] = None,
+    ) -> Dict[str, List[str]]:
+        """
+        Return `{category_id: [brand_norm, ...]}` for every `(brand, category_id)` that had a
+        rendered/published video within `within_days` (default 30 days).
+        Prevents sibling-variant repeats like `Baseus i-wok2` followed 4 days later by `Baseus i-Wok Pro`.
+        """
+        now_dt = now or dt.datetime.now().astimezone()
+        cutoff = now_dt - dt.timedelta(days=max(1, int(within_days)))
+        out: Dict[str, List[str]] = {}
+        for e in self.get_all_entries().values():
+            if not (e.has_solo_video or e.has_combo_video or e.last_rendered_at):
+                continue
+            ts_iso = e.last_rendered_at or e.updated_at
+            if not ts_iso:
+                continue
+            try:
+                ts_dt = dt.datetime.fromisoformat(str(ts_iso))
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=now_dt.tzinfo)
+                if ts_dt < cutoff:
+                    continue
+            except Exception:
+                continue
+            b_norm = re.sub(r"[^a-z0-9]", "", (e.brand or "").lower())
+            if b_norm and e.category_id:
+                bucket = out.setdefault(e.category_id, [])
+                if b_norm not in bucket:
+                    bucket.append(b_norm)
+        return out
+
+    def is_brand_category_recently_covered(
+        self,
+        brand: str,
+        category_id: str,
+        within_days: int = 30,
+        now: Optional[dt.datetime] = None,
+    ) -> bool:
+        b_norm = re.sub(r"[^a-z0-9]", "", (brand or "").lower())
+        if not b_norm or not category_id:
+            return False
+        recent_map = self.get_recent_brand_categories(within_days=within_days, now=now)
+        return b_norm in recent_map.get(category_id, [])
+
     def get_blocked_categories_and_skus(
         self,
         now: Optional[dt.datetime] = None,
+        category_cooldown_days: int = 14,
+        brand_category_cooldown_days: int = 30,
     ) -> Dict[str, List[str]]:
         entries = self.get_all_entries()
-        cooldown_cats: List[str] = []
+        recent_cats = self.get_recent_categories(within_days=category_cooldown_days, now=now)
+        cooldown_cats: List[str] = list(recent_cats.keys())
         blocked_skus: List[str] = []
         for k, e in entries.items():
             in_cd = self.is_in_cooldown(k, now=now)
@@ -212,9 +311,16 @@ class SKURegistryManager:
                 cooldown_cats.append(e.category_id)
             if e.lifecycle_status == "RETIRED_EXHAUSTED" or in_cd:
                 blocked_skus.append(f"{e.brand} {e.model_code or e.candidate_id}".strip())
+        recent_bc = self.get_recent_brand_categories(within_days=brand_category_cooldown_days, now=now)
+        blocked_bc_labels = [
+            f"{b} ({cid})"
+            for cid, brands in recent_bc.items()
+            for b in brands
+        ]
         return {
             "cooldown_categories": cooldown_cats,
             "blocked_sku_names": blocked_skus,
+            "blocked_brand_categories": blocked_bc_labels,
         }
 
     def record_rendered_video_skus(
