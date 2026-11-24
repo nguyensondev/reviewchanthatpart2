@@ -2849,12 +2849,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         flush=True,
                     )
                     started_iso = qm.record_render_started(sc.script_id)
-                    item = await self._produce_single_video_async(
-                        sc,
-                        m3_data,
-                        layout_mode,
-                        voices_used_today=voices_so_far,
-                    )
+                    try:
+                        item = await self._produce_single_video_async(
+                            sc,
+                            m3_data,
+                            layout_mode,
+                            voices_used_today=voices_so_far,
+                        )
+                    except RuntimeError as render_exc:
+                        if "No verified official brand videos available for script" in str(render_exc):
+                            print(
+                                f"[M4 SELF-HEAL] 🧹 Kịch bản `{sc.script_id}` không còn video gốc chính hãng hợp lệ "
+                                f"-> tự động gỡ khỏi hàng đợi (video_registry + m2/m3) để không lặp lỗi và chuyển sang kịch bản khác!",
+                                flush=True,
+                            )
+                            self.video_registry.delete_entry(sc.script_id)
+                            self.video_registry.purge_script_from_m2_m3_files(sc.script_id)
+                            if sc.script_id not in skipped_ids:
+                                skipped_ids.append(sc.script_id)
+                            continue
+                        raise
                     ev = qm.record_rendered_video(
                         sc.script_id,
                         render_duration_sec=item.render_duration_sec,
