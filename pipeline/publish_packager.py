@@ -853,6 +853,29 @@ class PublishPackager:
         )
         yt_description = sanitize_youtube_metadata_text(raw_yt_description, max_chars=4800)
 
+        # 4. TikTok High-SEO Caption (STRICTLY 0% Shopee links, 0% external URLs, 0% 'Shopee' keyword!)
+        tk_pros_clean = [
+            re.sub(r"\bshopee(?:\s+mall)?\b", "chính hãng", p, flags=re.IGNORECASE)
+            for p in pros_bullets[:2]
+        ]
+        tk_caveat_clean = [
+            re.sub(r"\bshopee(?:\s+mall)?\b", "chính hãng", c, flags=re.IGNORECASE)
+            for c in caveat_bullets[:1]
+        ]
+        tk_hashtags = list(dict.fromkeys(hashtags + ["#ReviewCongNghe" if entry.domain == "TECH_DESK" else "#ReviewGiaDung"]))[:6]
+        tk_hashtag_line = " ".join(tk_hashtags)
+        tiktok_caption_seo = (
+            f"{fb_title}\n\n"
+            + ("✅ Điểm nổi bật thực tế:\n" + "\n".join(tk_pros_clean) + "\n\n" if tk_pros_clean else "")
+            + ("\n".join(tk_caveat_clean) + "\n\n" if tk_caveat_clean else "")
+            + "💬 Bạn thấy mẫu này có hợp nhu cầu dùng hằng ngày không? Comment bên dưới nhé!\n"
+            + "🤖 Video có sử dụng giọng đọc và biên tập hỗ trợ bởi AI.\n\n"
+            + tk_hashtag_line
+        )
+        # Double-check zero URLs or 'shopee' leaks in TikTok caption
+        tiktok_caption_seo = re.sub(r"https?://\S+", "", tiktok_caption_seo)
+        tiktok_caption_seo = re.sub(r"\bshopee\b", "chính hãng", tiktok_caption_seo, flags=re.IGNORECASE).strip()
+
         hook_short = (entry.hook_title_short_vi or entry.title_vi[:28]).strip()
         vid_path = MacOSLegacyRuntime.resolve_portable_video_path(entry.video_path, entry.script_id)
         vid_path_str = str(vid_path)
@@ -888,7 +911,7 @@ class PublishPackager:
             youtube_shorts_description_vi=yt_description,
             youtube_video_tags=yt_tags,
             chapter_timestamps_vi=chapters,
-            tiktok_caption_full_vi=reels_caption,
+            tiktok_caption_full_vi=tiktok_caption_seo,
             facebook_reels_caption_full_vi=reels_caption,
             pinned_comment_vi=pinned_comment,
             youtube_pinned_comment_vi=yt_pinned_comment,

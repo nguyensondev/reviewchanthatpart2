@@ -79,6 +79,8 @@ class M5PublishItemResult(BaseModel):
     facebook_reels_status: str = "STAGED"
     facebook_reel_id: str = ""
     facebook_comment_id: str = ""
+    tiktok_status: str = "STAGED"
+    tiktok_publish_id: str = ""
     registry_status_after: str = "RENDERED"
 
 
@@ -738,6 +740,174 @@ class M5PublisherEngine:
 
             return video_id, comment_id
 
+    def _upload_tiktok_video(
+        self, pkg: PublishVideoPackageItem, tk_creds: Dict[str, Any]
+    ) -> Tuple[str, str]:
+        """
+        Upload 9:16 MP4 directly via TikTok Content Posting API v2 (`FILE_UPLOAD`).
+        - Refreshes OAuth2 `access_token` automatically via 365-day `refresh_token`.
+        - Default `publish_mode == "inbox_draft"` uses `/v2/post/publish/inbox/video/init/`
+          (works immediately in Sandbox without Audit) and notifies Telegram with the 0%-Shopee
+          high-SEO TikTok caption ready to paste.
+        - When `publish_mode == "direct_public"` (after TikTok Audit), uses `/v2/post/publish/video/init/`
+          with `is_aigc=True` and `privacy_level="PUBLIC_TO_EVERYONE"`.
+        """
+        client_key = str(tk_creds.get("client_key") or "").strip()
+        client_secret = str(tk_creds.get("client_secret") or "").strip()
+        refresh_token = str(tk_creds.get("refresh_token") or "").strip()
+        publish_mode = str(tk_creds.get("publish_mode") or "inbox_draft").strip().lower()
+        if not (client_key and client_secret and refresh_token):
+            raise RuntimeError("Missing TikTok OAuth2 credentials in config/platform_credentials.json")
+
+        vpath = MacOSLegacyRuntime.resolve_portable_video_path(pkg.video_path, pkg.script_id)
+        file_size = vpath.stat().st_size
+        ca_bundle = MacOSLegacyRuntime.resolve_ca_bundle_path()
+
+        with httpx.Client(timeout=120.0, verify=ca_bundle or True) as client:
+            # 1. Refresh short-lived (24h) access_token via 365-day refresh_token
+            tok_resp = client.post(
+                "https://open.tiktokapis.com/v2/oauth/token/",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={
+                    "client_key": client_key,
+                    "client_secret": client_secret,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+            )
+            tok_resp.raise_for_status()
+            tok_json = tok_resp.json()
+            access_token = str(tok_json.get("access_token") or "").strip()
+            new_refresh = str(tok_json.get("refresh_token") or "").strip()
+            if not access_token:
+                raise RuntimeError(f"TikTok token refresh failed: {tok_json}")
+
+            # Persist rotated refresh_token atomically so the 365-day session stays alive indefinitely
+            if new_refresh and new_refresh != refresh_token:
+                try:
+                    all_creds = self._load_credentials()
+                    if isinstance(all_creds.get("tiktok"), dict):
+                        all_creds["tiktok"]["access_token"] = access_token
+                        all_creds["tiktok"]["refresh_token"] = new_refresh
+                        atomic_write_json(self.creds_path, all_creds)
+                except Exception:
+                    pass
+
+            # 2. Initialize FILE_UPLOAD (single chunk if <= 64MB, else 10MB chunks)
+            if file_size <= 64 * 1024 * 1024:
+                chunk_size = file_size
+                total_chunks = 1
+            else:
+                chunk_size = 10 * 1024 * 1024
+                total_chunks = (file_size + chunk_size - 1) // chunk_size
+
+            auth_headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            }
+            if publish_mode == "direct_public":
+                init_url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+                tk_title = (pkg.tiktok_caption_full_vi or pkg.facebook_reels_title_vi)[:2200]
+                init_body: Dict[str, Any] = {
+                    "post_info": {
+                        "title": tk_title,
+                        "privacy_level": "PUBLIC_TO_EVERYONE",
+                        "disable_comment": False,
+                        "disable_duet": False,
+                        "disable_stitch": False,
+                        "is_aigc": True,
+                    },
+                    "source_info": {
+                        "source": "FILE_UPLOAD",
+                        "video_size": file_size,
+                        "chunk_size": chunk_size,
+                        "total_chunk_count": total_chunks,
+                    },
+                }
+            else:
+                init_url = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
+                init_body = {
+                    "source_info": {
+                        "source": "FILE_UPLOAD",
+                        "video_size": file_size,
+                        "chunk_size": chunk_size,
+                        "total_chunk_count": total_chunks,
+                    }
+                }
+
+            init_resp = client.post(init_url, headers=auth_headers, json=init_body)
+            init_json = init_resp.json()
+            err_obj = init_json.get("error") or {}
+            if init_resp.status_code >= 400 or (err_obj.get("code") not in (None, "", "ok")):
+                raise RuntimeError(f"TikTok init failed (HTTP {init_resp.status_code}): {init_json}")
+
+            init_data = init_json.get("data") or {}
+            publish_id = str(init_data.get("publish_id") or "").strip()
+            upload_url = str(init_data.get("upload_url") or "").strip()
+            if not (publish_id and upload_url):
+                raise RuntimeError(f"TikTok init missing publish_id/upload_url: {init_json}")
+
+            # 3. Upload MP4 binary chunk(s) directly to TikTok upload_url
+            with vpath.open("rb") as vf:
+                offset = 0
+                while offset < file_size:
+                    chunk_bytes = vf.read(chunk_size)
+                    if not chunk_bytes:
+                        break
+                    end_byte = offset + len(chunk_bytes) - 1
+                    put_resp = client.put(
+                        upload_url,
+                        headers={
+                            "Content-Type": "video/mp4",
+                            "Content-Length": str(len(chunk_bytes)),
+                            "Content-Range": f"bytes {offset}-{end_byte}/{file_size}",
+                        },
+                        content=chunk_bytes,
+                        timeout=300.0,
+                    )
+                    if put_resp.status_code not in (200, 201, 206):
+                        raise RuntimeError(
+                            f"TikTok chunk PUT failed (HTTP {put_resp.status_code}): {put_resp.text[:240]}"
+                        )
+                    offset = end_byte + 1
+
+            # 4. Brief status poll to confirm TikTok received & queued the video
+            final_state = "SENT_TO_INBOX" if publish_mode != "direct_public" else "PUBLISHED"
+            for _ in range(4):
+                time.sleep(3)
+                try:
+                    st_resp = client.post(
+                        "https://open.tiktokapis.com/v2/post/publish/status/fetch/",
+                        headers=auth_headers,
+                        json={"publish_id": publish_id},
+                    )
+                    if st_resp.status_code == 200:
+                        st_data = (st_resp.json().get("data") or {})
+                        tk_st = str(st_data.get("status") or "").upper()
+                        if tk_st in ("SEND_TO_USER_INBOX", "PUBLISH_COMPLETE"):
+                            final_state = tk_st
+                            break
+                        if tk_st == "FAILED":
+                            raise RuntimeError(f"TikTok publish status FAILED: {st_data}")
+                except RuntimeError:
+                    raise
+                except Exception:
+                    break
+
+            # 5. For Inbox Draft mode, push the clean 0%-Shopee TikTok SEO caption to Telegram for 1-tap copy-paste
+            if publish_mode != "direct_public" and pkg.tiktok_caption_full_vi:
+                try:
+                    TelegramNotifier().send_message(
+                        "🎵 TIKTOK NHÁP ĐÃ SẴN SÀNG TRONG HỘP THƯ APP!\n"
+                        f"🎬 Video: {pkg.facebook_reels_title_vi}\n"
+                        "👉 Mở thông báo TikTok trên điện thoại, bật nhãn AI và dán đoạn Caption SEO sạch (0% link Shopee) bên dưới:\n\n"
+                        f"{pkg.tiktok_caption_full_vi}"
+                    )
+                except Exception:
+                    pass
+
+            return publish_id, final_state
+
     def run(
         self,
         live_upload: bool = False,
@@ -800,14 +970,20 @@ class M5PublisherEngine:
         creds = self._load_credentials()
         yt_creds = creds.get("youtube") or {}
         fb_creds = creds.get("facebook_reels") or {}
+        tk_creds = creds.get("tiktok") or {}
         has_yt_creds = bool(yt_creds.get("client_id") and yt_creds.get("refresh_token"))
         has_fb_creds = bool(fb_creds.get("page_id") and fb_creds.get("page_access_token"))
+        has_tk_creds = bool(
+            tk_creds.get("client_key") and tk_creds.get("client_secret") and tk_creds.get("refresh_token")
+        )
 
         required_platforms: List[str] = []
         if has_yt_creds:
             required_platforms.append("youtube_shorts")
         if has_fb_creds:
             required_platforms.append("facebook_reels")
+        if has_tk_creds:
+            required_platforms.append("tiktok")
 
         can_pub_now, pub_gate_reason, wait_pub_sec = self.can_publish_human_now(force_now=force_now)
         results: List[M5PublishItemResult] = []
@@ -927,6 +1103,31 @@ class M5PublisherEngine:
                         item_res.facebook_reels_status = f"ERROR: {exc}"
             else:
                 item_res.facebook_reels_status = "STAGED_AWAITING_PAGE_TOKEN"
+
+            if has_tk_creds:
+                if "tiktok" in already_done_platforms:
+                    item_res.tiktok_status = "ALREADY_PUBLISHED_SKIPPED_ON_RESUME"
+                else:
+                    if uploaded_platforms_now:
+                        stagger_s = HumanBehaviorGuard.sample_cross_platform_stagger_sec()
+                        print(f"[M5 HUMAN GUARD] Lệch pha tự nhiên {stagger_s}s trước khi đẩy sang TikTok...", flush=True)
+                        time.sleep(stagger_s)
+                    try:
+                        tk_pub_id, tk_state = self._upload_tiktok_video(pkg, tk_creds)
+                        item_res.tiktok_status = tk_state
+                        item_res.tiktok_publish_id = tk_pub_id
+                        updated = self.video_registry.mark_video_published(
+                            pkg.script_id,
+                            platform="tiktok",
+                            required_platforms=required_platforms,
+                        )
+                        if updated:
+                            item_res.registry_status_after = updated.status
+                        uploaded_platforms_now.append("tiktok")
+                    except Exception as exc:
+                        item_res.tiktok_status = f"ERROR: {exc}"
+            else:
+                item_res.tiktok_status = "STAGED_AWAITING_TIKTOK_OAUTH"
 
             if uploaded_platforms_now:
                 published_count += 1

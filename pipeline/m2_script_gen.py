@@ -366,6 +366,7 @@ RÀNG BUỘC KỸ THUẬT & NGÔN NGỮ TUYỆT ĐỐI (ZERO TOLERANCE):
 - `target_candidate_id` ở mỗi beat phải dùng đúng chuỗi `candidate_id` có thật trong dữ liệu M1.
 - `on_screen_text_vi`: Ngắn gọn, súc tích, tiếng Việt CÓ DẤU ĐẦY ĐỦ, TUYỆT ĐỐI KHÔNG QUÁ 8 TỪ.
 - KHÔNG ĐƯỢC BỊA THÊM thông số, công suất, thời gian bảo hành hay giá bán khác với dữ liệu M1 đã cho.
+- AN TOÀN ĐA NỀN TẢNG (YOUTUBE + FACEBOOK + TIKTOK): TUYỆT ĐỐI KHÔNG nhắc tên sàn TMĐT cụ thể (như "Shopee", "Lazada", "Tiki") trong lời thoại `voiceover_vi` hay phụ đề — chỉ nói trung tính *"gian hàng chính hãng"* để 1 video MP4 đăng được an toàn trên cả TikTok lẫn YouTube/Facebook!
 """.strip()
 
     def _index_m1_entities(
