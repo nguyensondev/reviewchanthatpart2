@@ -205,10 +205,91 @@ function renderBioHubHtml() {{
 </html>`;
 }}
 
+function renderLegalPageHtml(pageTitle, bodyHtml) {{
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${{escapeHtml(pageTitle)}} — Goc Review Chan Thuc</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0f172a; color:#e2e8f0; max-width:740px; margin:0 auto; padding:32px 20px; line-height:1.65; }}
+    h1 {{ color:#f8fafc; font-size:24px; margin-bottom:12px; }}
+    h2 {{ color:#fbbf24; font-size:17px; margin:20px 0 8px; }}
+    p, li {{ font-size:15px; color:#cbd5e1; margin-bottom:10px; }}
+    ul {{ padding-left:20px; }}
+    .meta {{ font-size:13px; color:#94a3b8; margin-bottom:20px; }}
+    a {{ color:#38bdf8; }}
+  </style>
+</head>
+<body>
+  <h1>${{escapeHtml(pageTitle)}}</h1>
+  <div class="meta">Application: GocReview Uploader (Goc Review Chan Thuc) • Last Updated: November 2026</div>
+  ${{bodyHtml}}
+</body>
+</html>`;
+}}
+
+function renderTikTokCallbackHtml(url) {{
+  const code = url.searchParams.get("code") || "";
+  const err = url.searchParams.get("error_description") || url.searchParams.get("error") || "";
+  const state = url.searchParams.get("state") || "";
+  const content = code
+    ? `<p>Authorization succeeded! Copy the authorization code below and paste it into your local setup tool:</p>
+       <pre style="background:#1e293b;padding:14px;border-radius:10px;overflow-x:auto;color:#4ade80;font-size:14px;">${{escapeHtml(code)}}</pre>
+       <p style="font-size:13px;color:#94a3b8;">State: ${{escapeHtml(state)}}</p>`
+    : `<p style="color:#f87171;">No authorization code received. ${{escapeHtml(err)}}</p>`;
+  return renderLegalPageHtml("TikTok OAuth Callback", content);
+}}
+
 export default {{
   async fetch(request) {{
     const url = new URL(request.url);
     const slug = url.pathname.replace(/^\\/+|\\/+$/g, "").toLowerCase();
+
+    if (slug === "terms") {{
+      const termsBody = `
+        <p>Welcome to <strong>GocReview Uploader</strong>, a personal creator publishing utility operated by Goc Review Chan Thuc to prepare and upload original short-form product review videos to the creator's own authorized social media accounts.</p>
+        <h2>1. Authorized Use</h2>
+        <p>This application is strictly used by its owner to upload original review videos (including drafts via TikTok Content Posting API) to authorized accounts. It does not sell access to third parties or perform unauthorized scraping.</p>
+        <h2>2. Content Responsibility</h2>
+        <p>All uploaded videos are original product reviews created and reviewed by the account owner and comply with TikTok Community Guidelines and applicable laws, including AI-assisted content disclosure.</p>
+        <h2>3. Limitation of Liability</h2>
+        <p>This utility is provided "as is" without warranties of any kind. The operator may update these terms at any time.</p>
+        <h2>4. Contact</h2>
+        <p>For inquiries regarding these Terms of Service, contact the operator via <a href="/">Goc Review Chan Thuc</a>.</p>`;
+      return new Response(renderLegalPageHtml("Terms of Service", termsBody), {{
+        status: 200,
+        headers: {{ "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" }},
+      }});
+    }}
+
+    if (slug === "privacy") {{
+      const privacyBody = `
+        <p><strong>GocReview Uploader</strong> respects user privacy and handles data strictly for uploading videos to the creator's own authorized TikTok account.</p>
+        <h2>1. Data Collected</h2>
+        <ul>
+          <li>Basic account profile identifier and OAuth access/refresh tokens granted explicitly by the creator via TikTok Login Kit.</li>
+          <li>Video media files and captions selected by the creator for upload.</li>
+        </ul>
+        <h2>2. How Data Is Used</h2>
+        <p>OAuth tokens are stored locally on the creator's private machine solely to upload videos via the official TikTok Content Posting API. We do not sell, rent, or share user data with any third party.</p>
+        <h2>3. Data Retention & Revocation</h2>
+        <p>You may revoke access at any time from your TikTok account settings (<em>Manage app permissions</em>), after which local tokens are immediately invalidated and deleted.</p>
+        <h2>4. Contact</h2>
+        <p>For privacy questions or deletion requests, visit <a href="/">Goc Review Chan Thuc</a>.</p>`;
+      return new Response(renderLegalPageHtml("Privacy Policy", privacyBody), {{
+        status: 200,
+        headers: {{ "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" }},
+      }});
+    }}
+
+    if (slug === "tiktok/callback") {{
+      return new Response(renderTikTokCallbackHtml(url), {{
+        status: 200,
+        headers: {{ "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }},
+      }});
+    }}
 
     if (!slug || !(slug in ROUTES)) {{
       return new Response(renderBioHubHtml(), {{
