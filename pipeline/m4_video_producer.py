@@ -106,19 +106,29 @@ MAX_CONTINUOUS_SHOT_SEC = 3.6
 TIKTOK_TTS_API_URL = "https://ottsy.weilbyte.dev/api/generation"
 GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 GEMINI_VOICE_MAP: Dict[str, Tuple[str, str]] = {
+    "gemini_despina": (
+        "Despina",
+        "Đọc bằng giọng nữ tiếng Việt tự nhiên, ấm áp, tươi sáng và gần gũi như người bạn chia sẻ đồ gia dụng hay và mẹo dọn nhà sạch gọn. "
+        "Không tạo tiếng hít thở lớn hay tiếng lấy hơi rõ, phát âm tròn vành rõ chữ, ngắt nghỉ tự nhiên đúng dấu câu:\n",
+    ),
+    "gemini_orus": (
+        "Orus",
+        "Đọc bằng giọng nam tiếng Việt trầm ấm, điềm đạm, chân thật và đáng tin cậy như người dùng thực tế review đồ gia dụng và vệ sinh nhà cửa. "
+        "Không tạo tiếng hít thở lớn hay tiếng lấy hơi rõ, phát âm chuẩn tiếng Việt, ngắt nghỉ tự nhiên đúng dấu câu:\n",
+    ),
     "gemini_aoede": (
         "Aoede",
-        "Đọc bằng giọng nữ tiếng Việt tự nhiên, ấm áp, dễ nghe như người bạn chia sẻ kinh nghiệm mua đồ thật. "
+        "Đọc bằng giọng nữ tiếng Việt tự nhiên, ấm áp, dễ nghe như người bạn chia sẻ kinh nghiệm mua đồ gia dụng thật. "
         "Không tạo tiếng hít thở lớn hay tiếng lấy hơi rõ, phát âm tròn vành rõ chữ, ngắt nghỉ tự nhiên đúng dấu câu:\n",
     ),
     "gemini_puck": (
         "Puck",
-        "Đọc bằng giọng nam reviewer công nghệ tiếng Việt trẻ trung, trầm ấm, gần gũi và điềm đạm dễ nghe. "
+        "Đọc bằng giọng nam reviewer đồ gia dụng tiếng Việt trẻ trung, trầm ấm, gần gũi và điềm đạm dễ nghe. "
         "Không tạo tiếng hít thở lớn hay tiếng lấy hơi rõ, phát âm chuẩn tiếng Việt, ngắt nghỉ tự nhiên đúng dấu câu:\n",
     ),
 }
-# Primary pool combines Gemini 2.5 Flash TTS (Aoede/Puck) + TikTok TTS (BV074/BV075) randomly per gender;
-# Microsoft Edge Neural TTS (vi-VN-HoaiMyNeural / vi-VN-NamMinhNeural) serves as fallback.
+# Primary voices for Channel #2 (Nhà Có Đồ Hay): Gemini 2.5 Flash TTS Despina (Female) & Orus (Male).
+# Fallback chain: Gemini Aoede/Puck -> TikTok TTS (BV074/BV075) -> Microsoft Edge Neural TTS -> Google TTS.
 VOICE_POOL: List[Tuple[str, Literal["FEMALE", "MALE"], str]] = [
     ("BV074_streaming", "FEMALE", "vi-VN-HoaiMyNeural"),
     ("BV075_streaming", "MALE", "vi-VN-NamMinhNeural"),
@@ -126,9 +136,10 @@ VOICE_POOL: List[Tuple[str, Literal["FEMALE", "MALE"], str]] = [
 VOICE_RATE = "+8%"
 
 _HIGHLIGHT_PAT = re.compile(
-    r"(\b(?:\d+(?:[.,]\d+)?(?:\s*x\s*\d+)?\s*(?:k|tr|ml|mm|cm|g|kg|W|V|độ|DPI|K|Ra\d+)|"
-    r"Inox\s*\d+|USB[-\s]*C|Type[-\s]*C|Logi\s*Bolt|SmartWheel|LED|"
-    r"Baseus|i-wok2|Logitech|Lift\s*Vertical|Tanita|KD-\d+|Xiaomi|Ugreen|Anker|Lock&Lock|Inochi|OEM)\b)",
+    r"(\b(?:\d+(?:[.,]\d+)?(?:\s*x\s*\d+)?\s*(?:k|tr|Pa|kPa|ml|L|lít|mm|cm|g|kg|W|V|dB|kHz|độ|°C|phút|giờ|mAh)|"
+    r"UV-?C|HEPA(?:\s*H\d+)?|IPX\d|Inox\s*\d+|USB[-\s]*C|Type[-\s]*C|LED|"
+    r"Deerma|Xiaomi|Mijia|Dreame|Tineco|Philips|Tefal|Levoit|Bear|Gaabor|Simplus|"
+    r"Lock&Lock|LocknLock|Elmich|Inochi|Panasonic|Sharp|Kangaroo|Sunhouse|Sothing|PerySmith|Baseus|OEM)\b)",
     flags=re.IGNORECASE,
 )
 
@@ -217,11 +228,11 @@ def _format_ass_time(seconds: float) -> str:
 
 
 def _highlight_ass_keywords(text: str) -> str:
-    """Highlight numeric specs and brand/model tokens in gold while keeping neutral white body."""
-    gold = r"{\c&H0034C4FF&}"
+    """Highlight numeric specs and cleaning/appliance brand tokens in fresh aqua-mint (#30E4CE) on white body."""
+    aqua_mint = r"{\c&H00CEE430&}"
     white = r"{\c&H00FFFFFF&}"
     escaped = text.replace("{", "(").replace("}", ")")
-    return _HIGHLIGHT_PAT.sub(lambda m: f"{gold}{m.group(1)}{white}", escaped)
+    return _HIGHLIGHT_PAT.sub(lambda m: f"{aqua_mint}{m.group(1)}{white}", escaped)
 
 
 def _split_aligned_clauses(tts_text: str, sub_text: str) -> List[Tuple[str, str]]:
@@ -363,17 +374,25 @@ def _choose_voice_for_video(
     preferred_voice: Optional[str] = None,
 ) -> List[Tuple[str, Literal["FEMALE", "MALE"], str]]:
     """
-    Select ordered `(primary_tiktok_voice, gender, fallback_edge_voice)` candidates.
-    Randomizes between Female (`BV074_streaming`) and Male (`BV075_streaming`) while
-    ensuring gender balance across the 3 daily videos.
+    Select ordered `(fallback_tiktok_voice, gender, fallback_edge_voice)` candidates.
+    Balances Female (`Despina` primary) and Male (`Orus` primary) across daily videos.
     """
-    if preferred_voice == "BV075_streaming":
+    pref = (preferred_voice or "").strip()
+    if pref in ("gemini_orus", "gemini_puck", "BV075_streaming", "vi-VN-NamMinhNeural", "MALE", "male", "Orus"):
         return [VOICE_POOL[1], VOICE_POOL[0]]
-    if preferred_voice == "BV074_streaming":
+    if pref in ("gemini_despina", "gemini_aoede", "BV074_streaming", "vi-VN-HoaiMyNeural", "FEMALE", "female", "Despina"):
         return [VOICE_POOL[0], VOICE_POOL[1]]
 
-    female_cnt = sum(1 for v in voices_used_today if v in ("gemini_aoede", "BV074_streaming", "vi-VN-HoaiMyNeural"))
-    male_cnt = sum(1 for v in voices_used_today if v in ("gemini_puck", "BV075_streaming", "vi-VN-NamMinhNeural"))
+    female_cnt = sum(
+        1
+        for v in voices_used_today
+        if v in ("gemini_despina", "gemini_aoede", "BV074_streaming", "vi-VN-HoaiMyNeural")
+    )
+    male_cnt = sum(
+        1
+        for v in voices_used_today
+        if v in ("gemini_orus", "gemini_puck", "BV075_streaming", "vi-VN-NamMinhNeural")
+    )
 
     if female_cnt > male_cnt:
         return [VOICE_POOL[1], VOICE_POOL[0]]
@@ -443,28 +462,125 @@ def _render_pil_rounded_card(
     h: int,
     title: str,
     lines: List[str],
-    accent: Tuple[int, int, int] = (255, 196, 52),
+    accent: Tuple[int, int, int] = (14, 154, 146),
+    badge_label: str = "THÔNG SỐ",
+    show_bullets: bool = True,
 ) -> None:
-    """Render a translucent dark rounded overlay card (`spec_card` or `caveat_card`) with PIL (zero missing-emoji tofu)."""
+    """
+    Channel #2 (Nhà Có Đồ Hay) Clean Editorial Top-Ribbon Card:
+    Light frosted-alabaster / warm-ivory card with a deep colored top header ribbon,
+    crisp charcoal typography, and rounded bullet dots — visually distinct from Channel #1's
+    dark navy left-striped yellow card.
+    """
     clean_title = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%]", "", title or "").strip() or "THÔNG TIN"
+    is_warm = accent[0] > 180 and accent[1] < 170
+    card_bg = (255, 250, 245, 242) if is_warm else (246, 252, 251, 242)
+    header_bg = (214, 102, 34, 252) if is_warm else (13, 114, 114, 252)
+    border_col = (232, 134, 68, 255) if is_warm else (48, 212, 194, 255)
+    bullet_col = (214, 102, 34, 255) if is_warm else (14, 158, 148, 255)
+    badge_bg = (255, 232, 212, 255) if is_warm else (210, 252, 244, 255)
+    badge_fg = (158, 62, 14, 255) if is_warm else (8, 84, 84, 255)
+
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    # Main clean light card body
     d.rounded_rectangle(
         [0, 0, w - 1, h - 1],
         radius=28,
-        fill=(26, 33, 48, 212),
-        outline=(*accent, 255),
+        fill=card_bg,
+        outline=border_col,
         width=3,
     )
-    d.rounded_rectangle([0, 0, 12, h - 1], radius=6, fill=(*accent, 255))
-    ft = ImageFont.truetype(FONT_BOLD_PATH, 38)
-    fl = ImageFont.truetype(FONT_REG_PATH, 31)
-    d.text((36, 22), truncate_words_clean(clean_title, max_chars=32), font=ft, fill=(*accent, 255))
-    y = 22 + 56
+    # Top header ribbon (rounded top, flat bottom)
+    header_h = 74
+    d.rounded_rectangle([3, 3, w - 4, header_h], radius=24, fill=header_bg)
+    d.rectangle([3, header_h - 24, w - 4, header_h], fill=header_bg)
+
+    # Compact category pill on right side of header
+    f_badge = ImageFont.truetype(FONT_BOLD_PATH, 21)
+    b_txt = (badge_label or "THÔNG SỐ").upper()[:12]
+    b_box = d.textbbox((0, 0), b_txt, font=f_badge)
+    b_w = (b_box[2] - b_box[0]) + 28
+    bx1 = w - 22 - b_w
+    d.rounded_rectangle([bx1, 18, w - 22, 56], radius=14, fill=badge_bg)
+    d.text((bx1 + 14, 24), b_txt, font=f_badge, fill=badge_fg)
+
+    # Header title
+    ft = ImageFont.truetype(FONT_BOLD_PATH, 34)
+    d.text((28, 18), truncate_words_clean(clean_title, max_chars=26), font=ft, fill=(255, 255, 255, 255))
+
+    # Crisp dark charcoal body rows with clean circular dots (or clean prose when wrapped)
+    fl = ImageFont.truetype(FONT_REG_PATH, 30)
+    y = header_h + 24
     for ln in lines[:3]:
         clean_ln = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", ln or "").strip()
-        d.text((36, y), "• " + truncate_words_clean(clean_ln, max_chars=42), font=fl, fill=(244, 246, 250, 255))
-        y += 48
+        if show_bullets:
+            d.ellipse([28, y + 12, 40, y + 24], fill=bullet_col)
+            d.text((54, y), truncate_words_clean(clean_ln, max_chars=42), font=fl, fill=(22, 36, 44, 255))
+        else:
+            d.text((30, y), truncate_words_clean(clean_ln, max_chars=45), font=fl, fill=(22, 36, 44, 255))
+        y += 50
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path)
+
+
+def _render_channel_studio_frame_png(path: Path) -> None:
+    """
+    Render the static 1080x1920 Channel #2 ('Nhà Có Đồ Hay') Clean Studio Frame overlay PNG:
+      - Top frosted-teal brand pill at y=95..160 (`NHÀ CÓ ĐỒ HAY • REVIEW THẬT`)
+      - Sleek 3px aqua-mint (#30E4CE) showcase border framing the floating 980x552 video window at (50, 540)
+      - Subtle cool-teal studio tint over upper & lower zones (video window remains 100% untouched/transparent)
+    """
+    w, h = 1080, 1920
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    # Gentle cool-teal atmospheric wash on upper & lower ambient zones ONLY (leaves 50..1030, 540..1092 crystal clear)
+    vx1, vy1, vx2, vy2 = 50, 540, 1030, 1092
+    d.rectangle([0, 0, w, vy1], fill=(8, 36, 42, 76))
+    d.rectangle([0, vy2, w, h], fill=(8, 36, 42, 84))
+    d.rectangle([0, vy1, vx1, vy2], fill=(8, 36, 42, 76))
+    d.rectangle([vx2, vy1, w, vy2], fill=(8, 36, 42, 76))
+
+    # Top minimalist brand pill (`NHÀ CÓ ĐỒ HAY  •  REVIEW THẬT`)
+    pill_w, pill_h = 560, 62
+    px1 = (w - pill_w) // 2
+    py1 = 96
+    d.rounded_rectangle(
+        [px1, py1, px1 + pill_w, py1 + pill_h],
+        radius=31,
+        fill=(10, 40, 48, 212),
+        outline=(48, 228, 206, 220),
+        width=2,
+    )
+    # Glowing mint dot inside pill
+    d.ellipse([px1 + 26, py1 + 23, px1 + 42, py1 + 39], fill=(52, 232, 178, 255))
+    f_pill = ImageFont.truetype(FONT_BOLD_PATH, 26)
+    pill_txt = "NHÀ CÓ ĐỒ HAY  •  REVIEW THẬT"
+    tb = d.textbbox((0, 0), pill_txt, font=f_pill)
+    tw = tb[2] - tb[0]
+    tx = px1 + 48 + max(8, (pill_w - 64 - tw) // 2)
+    d.text((tx, py1 + 16), pill_txt, font=f_pill, fill=(238, 252, 250, 255))
+
+    # Floating video showcase studio frame border + soft outer shadow halo
+    d.rectangle([vx1 - 6, vy1 - 6, vx2 + 6, vy2 + 6], outline=(6, 24, 30, 145), width=6)
+    d.rectangle([vx1 - 3, vy1 - 3, vx2 + 3, vy2 + 3], outline=(48, 228, 206, 245), width=3)
+    # Subtle bright emerald corner brackets
+    c_len = 28
+    c_col = (116, 250, 220, 255)
+    # Top-left
+    d.line([(vx1 - 4, vy1 - 4), (vx1 + c_len, vy1 - 4)], fill=c_col, width=5)
+    d.line([(vx1 - 4, vy1 - 4), (vx1 - 4, vy1 + c_len)], fill=c_col, width=5)
+    # Top-right
+    d.line([(vx2 - c_len, vy1 - 4), (vx2 + 4, vy1 - 4)], fill=c_col, width=5)
+    d.line([(vx2 + 4, vy1 - 4), (vx2 + 4, vy1 + c_len)], fill=c_col, width=5)
+    # Bottom-left
+    d.line([(vx1 - 4, vy2 + 4), (vx1 + c_len, vy2 + 4)], fill=c_col, width=5)
+    d.line([(vx1 - 4, vy2 - c_len), (vx1 - 4, vy2 + 4)], fill=c_col, width=5)
+    # Bottom-right
+    d.line([(vx2 - c_len, vy2 + 4), (vx2 + 4, vy2 + 4)], fill=c_col, width=5)
+    d.line([(vx2 + 4, vy2 - c_len), (vx2 + 4, vy2 + 4)], fill=c_col, width=5)
+
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
 
@@ -1393,11 +1509,11 @@ class M4VideoProducerEngine:
 
         try:
             def _call_gemini_full() -> bytes:
-                from dotenv import load_dotenv
                 from google import genai
                 from google.genai import types
+                from pipeline.llm_client import load_env_file
 
-                load_dotenv()
+                load_env_file()
                 api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
                 if not api_key:
                     raise RuntimeError("Missing GEMINI_API_KEY for Gemini 2.5 Flash TTS")
@@ -1546,10 +1662,12 @@ class M4VideoProducerEngine:
         except Exception as exc:
             raw_master.unlink(missing_ok=True)
             clean_master.unlink(missing_ok=True)
-            provider_alive["gemini_tts"] = False
+            err_s = str(exc).upper()
+            if any(k in err_s for k in ("429", "403", "401", "RESOURCE_EXHAUSTED", "MISSING GEMINI_API_KEY", "API_KEY")):
+                provider_alive["gemini_tts"] = False
             print(
                 f"  [M4.3 TTS] Gemini 2.5 Flash 1-shot TTS '{locked_voice}' unavailable ({exc}); "
-                f"falling back to TikTok TTS -> Edge Neural TTS.",
+                f"trying next fallback voice.",
                 flush=True,
             )
             raise RuntimeError(f"Gemini 1-shot TTS failed ({exc})") from exc
@@ -1593,11 +1711,11 @@ class M4VideoProducerEngine:
             raw_gemini_wav.unlink(missing_ok=True)
             try:
                 def _call_gemini_tts() -> bytes:
-                    from dotenv import load_dotenv
                     from google import genai
                     from google.genai import types
+                    from pipeline.llm_client import load_env_file
 
-                    load_dotenv()
+                    load_env_file()
                     api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
                     if not api_key:
                         raise RuntimeError("Missing GEMINI_API_KEY for Gemini 2.5 Flash TTS")
@@ -1883,9 +2001,11 @@ class M4VideoProducerEngine:
         hook_end_sec: float,
     ) -> None:
         """
-        Write Layout B1 ASS file:
-          - Style `Sub`: `Fontsize=36` (10% smaller than demo's 40), centered at `y=1380` with `120ms` fade.
-          - Style `Hook`: `Fontsize=64`, slide-up `200ms` at `y=560`, strictly `<= 30` chars (`0..hook_end_sec`).
+        Write Channel #2 ('Nhà Có Đồ Hay') Clean Studio Frame ASS file:
+          - Style `Sub`: Frosted dark-teal boxed pill (`BorderStyle=3`, `Fontsize=42`), centered at `y=1255`
+            (cleanly below the floating 980x552 video frame & aqua-mint divider, well above Shorts/Reels UI).
+          - Style `Hook`: Crisp aqua-mint `#30E4CE` bold headline (`Fontsize=62`), slide-down at `y=355`
+            inside the upper editorial zone (`0..hook_end_sec`), strictly `<= 30` chars.
         """
         short_hook = enforce_short_hook_title(hook_title_short_vi, max_chars=30).upper()
         safe_hook = short_hook.replace("{", "(").replace("}", ")")
@@ -1899,8 +2019,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Sub,Arial,44,&H00FFFFFF,&H000000FF,&H000E1118,&HAA000000,-1,0,0,0,100,100,0.4,0,1,4.2,2.4,5,64,64,0,1
-Style: Hook,Arial,68,&H00FFFFFF,&H000000FF,&H000E1118,&H00000000,-1,0,0,0,100,100,0.5,0,1,4.5,2.4,5,60,60,0,1
+Style: Sub,Arial,42,&H00FFFFFF,&H000000FF,&H88262008,&H88262008,-1,0,0,0,100,100,0.4,0,3,13,0,5,72,72,0,1
+Style: Hook,Arial,62,&H00FFFFFF,&H000000FF,&H00241D07,&H00000000,-1,0,0,0,100,100,0.5,0,1,4.5,2.2,5,64,64,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1909,12 +2029,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         h_end = min(max(1.8, hook_end_sec), 3.2)
         lines.append(
             f"Dialogue: 3,{_format_ass_time(0.05)},{_format_ass_time(h_end)},Hook,,0,0,0,,"
-            f"{{\\move(540,590,540,560,0,220)\\fad(200,150)\\c&H0034C4FF&}}{safe_hook}"
+            f"{{\\move(540,325,540,355,0,220)\\fad(200,150)\\c&H00CEE430&}}{safe_hook}"
         )
         for st, et, stxt in timed_subtitles:
             lines.append(
                 f"Dialogue: 2,{_format_ass_time(st)},{_format_ass_time(et)},Sub,,0,0,0,,"
-                f"{{\\pos(540,1380)\\fad(120,80)}}{stxt}"
+                f"{{\\pos(540,1255)\\fad(120,80)}}{stxt}"
             )
         ass_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -1928,12 +2048,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         layout_mode: Literal["B1", "cinema", "fullscreen"] = "B1",
     ) -> None:
         """
-        Step M4.4a: Render segment in approved Layout B1:
+        Step M4.4a: Render segment in Channel #2 Clean Studio Frame layout:
           - If source is vertical (`height > width`) or `layout_mode == "fullscreen"`: full `1080x1920`.
           - Otherwise (16:9 studio footage):
-            * Background (`1080x1920`): exact same shot scaled to `270x480`, `boxblur=16:2`, scaled to `1080x1920`,
-              `eq=brightness=-0.10:saturation=0.9` (NO black `drawbox` bars).
-            * Foreground (`1080x608` at `y=656`): zero-zoom, zero-crop `scale=1080:608:flags=lanczos`.
+            * Background (`1080x1920`): exact same shot scaled to `270x480`, `boxblur=18:2`, scaled to `1080x1920`.
+            * Foreground (`980x552` floating showcase window at `x=50, y=540`): crisp 16:9 inset framing
+              visually distinct from Channel #1's edge-to-edge `1080x608` strip at `y=656`.
         """
         if out_mp4.exists() and out_mp4.stat().st_size > 10_000:
             try:
@@ -1964,9 +2084,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             vf = (
                 f"[0:v]{base_chain},split=2[vbg][vfg];"
                 f"[vbg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
-                f"boxblur=16:2,scale=1080:1920:flags=bilinear,setsar=1:1[bg];"
-                f"[vfg]scale=1080:608:flags=lanczos,setsar=1:1[fg];"
-                f"[bg][fg]overlay=x=0:y=656,setsar=1:1,setdar=9/16,"
+                f"boxblur=18:2,scale=1080:1920:flags=bilinear,setsar=1:1[bg];"
+                f"[vfg]scale=980:552:flags=lanczos,setsar=1:1[fg];"
+                f"[bg][fg]overlay=x=50:y=540,setsar=1:1,setdar=9/16,"
                 f"trim=duration={target_dur:.3f},format=yuv420p[vout]"
             )
 
@@ -2254,21 +2374,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 clause_specs.append((b, clause_counter, tts_part, sub_part, pool))
 
         voice_candidates = _choose_voice_for_video(voices_used_today, preferred_voice=preferred_voice)
-        # Priority order:
-        #   1. PRIMARY (100% Gemini 2.5 Flash 1-shot TTS — Aoede Female / Puck Male, only 1 API call/video!)
-        #   2. FALLBACK #1: TikTok TTS (BV074 / BV075)
-        #   3. FALLBACK #2: Microsoft Edge Neural TTS (HoaiMy / NamMinh)
-        #   4. EMERGENCY FALLBACK #3: Google TTS
+        # Priority order for Channel #2 (Nhà Có Đồ Hay):
+        #   1. PRIMARY (Gemini 2.5 Flash 1-shot TTS — Despina Female / Orus Male, only 1 API call/video!)
+        #   2. FALLBACK #1: Gemini 2.5 Flash alternate voices (Aoede Female / Puck Male)
+        #   3. FALLBACK #2: TikTok TTS (BV074 / BV075)
+        #   4. FALLBACK #3: Microsoft Edge Neural TTS (HoaiMy / NamMinh)
+        #   5. EMERGENCY FALLBACK #4: Google TTS
         gemini_primaries: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
+        gemini_fallbacks: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
         tiktok_fallbacks: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
         edge_fallbacks: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
         for primary_tiktok_voice, gender, fallback_edge in voice_candidates:
-            gemini_voice = "gemini_aoede" if gender == "FEMALE" else "gemini_puck"
-            gemini_primaries.append((gemini_voice, gender))
+            g_primary = "gemini_despina" if gender == "FEMALE" else "gemini_orus"
+            g_backup = "gemini_aoede" if gender == "FEMALE" else "gemini_puck"
+            gemini_primaries.append((g_primary, gender))
+            gemini_fallbacks.append((g_backup, gender))
             tiktok_fallbacks.append((primary_tiktok_voice, gender))
             edge_fallbacks.append((fallback_edge, gender))
         ordered_voice_attempts: List[Tuple[str, Literal["FEMALE", "MALE"]]] = (
-            gemini_primaries + tiktok_fallbacks + edge_fallbacks + [("google_female", "FEMALE")]
+            gemini_primaries
+            + gemini_fallbacks
+            + tiktok_fallbacks
+            + edge_fallbacks
+            + [("google_female", "FEMALE")]
         )
 
         sem = asyncio.Semaphore(1)
@@ -2513,9 +2641,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         spec_card_png = seg_dir / "card_spec.png"
         caveat_card_png = seg_dir / "card_caveat.png"
         price_card_png = seg_dir / "card_price.png"
-        _render_pil_rounded_card(spec_card_png, 760, 270, spec_title, spec_lines, accent=(255, 196, 52))
+        frame_overlay_png = seg_dir / "channel_frame_overlay.png"
+        _render_channel_studio_frame_png(frame_overlay_png)
         _render_pil_rounded_card(
-            caveat_card_png, 800, 260, "LƯU Ý THỰC TẾ", caveat_lines, accent=(255, 145, 48)
+            spec_card_png,
+            820,
+            275,
+            spec_title,
+            spec_lines,
+            accent=(14, 154, 146),
+            badge_label="THÔNG SỐ",
+        )
+        _render_pil_rounded_card(
+            caveat_card_png,
+            820,
+            275,
+            "LƯU Ý THỰC TẾ",
+            caveat_lines,
+            accent=(214, 102, 34),
+            badge_label="LƯU Ý",
+            show_bullets=False,
         )
 
         # Upgrade-1: Select and render one of 3 dynamic Beat-5 Visual End-Cards matched to `script.narrative_angle`
@@ -2595,18 +2740,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         v_fc = [
             f"[0:v]setsar=1:1,setdar=9/16[basev]",
+            f"[basev][8:v]overlay=0:0[framed]",
             f"[1:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
             f"fade=t=in:st={s2a}:d=0.2:alpha=1,fade=t=out:st={max(s2a+0.2, s2b-0.2):.2f}:d=0.2:alpha=1[c_spec]",
-            f"[basev][c_spec]overlay=x='160-60*max(0\\,1-(t-{s2a})/0.2)':y=320:enable='between(t,{s2a},{s2b})'[v1]",
+            f"[framed][c_spec]overlay=x=130:y='220-34*max(0\\,1-(t-{s2a})/0.22)':enable='between(t,{s2a},{s2b})'[v1]",
             f"[2:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
             f"fade=t=in:st={s4a}:d=0.2:alpha=1,fade=t=out:st={max(s4a+0.2, s4b-0.2):.2f}:d=0.2:alpha=1[c_cav]",
-            f"[v1][c_cav]overlay=x='140-60*max(0\\,1-(t-{s4a})/0.2)':y=325:enable='between(t,{s4a},{s4b})'[v2]",
+            f"[v1][c_cav]overlay=x=130:y='220-34*max(0\\,1-(t-{s4a})/0.22)':enable='between(t,{s4a},{s4b})'[v2]",
             f"[3:v]loop=-1:size=1,trim=duration={total_dur:.3f},format=rgba,"
             f"fade=t=in:st={s5a}:d=0.2:alpha=1[c_prc]",
-            f"[v2][c_prc]overlay=x='120-60*max(0\\,1-(t-{s5a})/0.2)':y=320:enable='between(t,{s5a},{s5b})'[v3]",
+            f"[v2][c_prc]overlay=x=120:y='212-34*max(0\\,1-(t-{s5a})/0.22)':enable='between(t,{s5a},{s5b})'[v3]",
             f"[v3]ass='{ass_filename}'[v4]",
-            f"color=c=0xFFC434:s=1080x6:d={total_dur:.3f}:r=30[pb]",
-            f"[v4][pb]overlay=x='-W+W*t/{total_dur:.3f}':y=0,setsar=1:1,setdar=9/16,format=yuv420p[vout]",
+            f"color=c=0x30E4CE:s=1080x6:d={total_dur:.3f}:r=30[pb]",
+            f"[v4][pb]overlay=x='-W+W*t/{total_dur:.3f}':y=1106,setsar=1:1,setdar=9/16,format=yuv420p[vout]",
         ]
 
         fade_out_st = max(0.0, total_dur - 1.5)
@@ -2663,6 +2809,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 str(whoosh_wav),
                 "-i",
                 str(pop_wav),
+                "-i",
+                frame_overlay_png.name,
                 "-filter_complex",
                 ";".join(v_fc + a_fc),
                 "-map",
