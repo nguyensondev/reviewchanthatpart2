@@ -284,6 +284,13 @@ export default {{
       }});
     }}
 
+    if (slug === "tiktokfsn0uxhhxpg21ly7embiwxzpcckdxdxi.txt") {{
+      return new Response("tiktok-developers-site-verification=fSN0uxHHxPG21Ly7eMbIwXzPcckdXdXI", {{
+        status: 200,
+        headers: {{ "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" }},
+      }});
+    }}
+
     if (slug === "tiktok/callback") {{
       return new Response(renderTikTokCallbackHtml(url), {{
         status: 200,
