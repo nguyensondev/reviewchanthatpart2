@@ -186,7 +186,7 @@ function renderBioHubHtml() {{
 </head>
 <body>
   <div class="header">
-    <h1>🏠 Nhà Sạch & Gia Dụng Mini</h1>
+    <h1>🏠 Nhà Có Đồ Hay</h1>
     <p>Tổng hợp link Shopee Mall Chính Hãng của các thiết bị vệ sinh & gia dụng mini trong video</p>
   </div>
   <input id="q" class="search-box" type="search" placeholder="🔍 Tìm nhanh tên hoặc mã máy (VD: Deerma, Philips, Xiaomi, Levoit...)" oninput="filterCards(this.value)">
@@ -211,20 +211,20 @@ function renderLegalPageHtml(pageTitle, bodyHtml) {{
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${{escapeHtml(pageTitle)}} — Goc Review Chan Thuc</title>
+  <title>${{escapeHtml(pageTitle)}} — Nha Co Do Hay</title>
   <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0f172a; color:#e2e8f0; max-width:740px; margin:0 auto; padding:32px 20px; line-height:1.65; }}
-    h1 {{ color:#f8fafc; font-size:24px; margin-bottom:12px; }}
-    h2 {{ color:#fbbf24; font-size:17px; margin:20px 0 8px; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#081e24; color:#e2e8f0; max-width:740px; margin:0 auto; padding:32px 20px; line-height:1.65; }}
+    h1 {{ color:#f0fdfa; font-size:24px; margin-bottom:12px; }}
+    h2 {{ color:#34e89e; font-size:17px; margin:20px 0 8px; }}
     p, li {{ font-size:15px; color:#cbd5e1; margin-bottom:10px; }}
     ul {{ padding-left:20px; }}
     .meta {{ font-size:13px; color:#94a3b8; margin-bottom:20px; }}
-    a {{ color:#38bdf8; }}
+    a {{ color:#30e4ce; }}
   </style>
 </head>
 <body>
   <h1>${{escapeHtml(pageTitle)}}</h1>
-  <div class="meta">Application: GocReview Uploader (Goc Review Chan Thuc) • Last Updated: November 2026</div>
+  <div class="meta">Application: NhaCoDoHay Uploader (Nha Co Do Hay) • Last Updated: November 2026</div>
   ${{bodyHtml}}
 </body>
 </html>`;
@@ -249,7 +249,7 @@ export default {{
 
     if (slug === "terms") {{
       const termsBody = `
-        <p>Welcome to <strong>GocReview Uploader</strong>, a personal creator publishing utility operated by Goc Review Chan Thuc to prepare and upload original short-form product review videos to the creator's own authorized social media accounts.</p>
+        <p>Welcome to <strong>NhaCoDoHay Uploader</strong>, a personal creator publishing utility operated by Nha Co Do Hay to prepare and upload original short-form product review videos to the creator's own authorized social media accounts.</p>
         <h2>1. Authorized Use</h2>
         <p>This application is strictly used by its owner to upload original review videos (including drafts via TikTok Content Posting API) to authorized accounts. It does not sell access to third parties or perform unauthorized scraping.</p>
         <h2>2. Content Responsibility</h2>
@@ -257,7 +257,7 @@ export default {{
         <h2>3. Limitation of Liability</h2>
         <p>This utility is provided "as is" without warranties of any kind. The operator may update these terms at any time.</p>
         <h2>4. Contact</h2>
-        <p>For inquiries regarding these Terms of Service, contact the operator via <a href="/">Goc Review Chan Thuc</a>.</p>`;
+        <p>For inquiries regarding these Terms of Service, contact the operator via <a href="/">Nha Co Do Hay</a>.</p>`;
       return new Response(renderLegalPageHtml("Terms of Service", termsBody), {{
         status: 200,
         headers: {{ "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" }},
@@ -266,7 +266,7 @@ export default {{
 
     if (slug === "privacy") {{
       const privacyBody = `
-        <p><strong>GocReview Uploader</strong> respects user privacy and handles data strictly for uploading videos to the creator's own authorized TikTok account.</p>
+        <p><strong>NhaCoDoHay Uploader</strong> respects user privacy and handles data strictly for uploading videos to the creator's own authorized TikTok account.</p>
         <h2>1. Data Collected</h2>
         <ul>
           <li>Basic account profile identifier and OAuth access/refresh tokens granted explicitly by the creator via TikTok Login Kit.</li>
@@ -277,7 +277,7 @@ export default {{
         <h2>3. Data Retention & Revocation</h2>
         <p>You may revoke access at any time from your TikTok account settings (<em>Manage app permissions</em>), after which local tokens are immediately invalidated and deleted.</p>
         <h2>4. Contact</h2>
-        <p>For privacy questions or deletion requests, visit <a href="/">Goc Review Chan Thuc</a>.</p>`;
+        <p>For privacy questions or deletion requests, visit <a href="/">Nha Co Do Hay</a>.</p>`;
       return new Response(renderLegalPageHtml("Privacy Policy", privacyBody), {{
         status: 200,
         headers: {{ "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" }},

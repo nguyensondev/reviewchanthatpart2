@@ -107,6 +107,13 @@
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
+    "Gaabor": {
+      "brand_name": "Gaabor",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["gaabor_official_store", "gaaborvietnam"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
     "JisuLife": {
       "brand_name": "JisuLife",
       "official_shop_ids": [],

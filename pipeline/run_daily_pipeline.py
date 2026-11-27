@@ -13,6 +13,7 @@ Coordinates modular execution of:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -50,6 +51,15 @@ from pipeline.schemas_m_trend import load_active_trend_opportunities
 from pipeline.shopee_browser_link_resolver import ShopeeAutoAffiliateResolver
 from pipeline.sku_registry import SKURegistryManager
 from pipeline.video_registry import VideoRegistryManager
+
+
+def _is_external_ffmpeg_busy() -> bool:
+    """Return True if another channel's FFmpeg render process is currently running on this Mac."""
+    try:
+        res = subprocess.run(["pgrep", "-x", "ffmpeg"], capture_output=True, timeout=3)
+        return res.returncode == 0
+    except Exception:
+        return False
 
 
 def _get_script_sku_keys(script: AuditedScriptItem, sreg: SKURegistryManager) -> set[str]:
@@ -532,7 +542,14 @@ def main() -> int:
                     ready_scripts, _ = get_ready_queued_scripts(vreg, sreg, qm)
 
             if ready_scripts:
-                run_single_render_step(ignore_2h_cooldown=args.ignore_2h_cooldown)
+                if not args.ignore_2h_cooldown and _is_external_ffmpeg_busy():
+                    print(
+                        "[AUTO CPU GUARD] ⏳ Phát hiện tiến trình FFmpeg của kênh khác đang render trên máy -> "
+                        "tạm nhường CPU sang chu kỳ kế tiếp để tránh quá tải Dual-Core i5!",
+                        flush=True,
+                    )
+                else:
+                    run_single_render_step(ignore_2h_cooldown=args.ignore_2h_cooldown)
             else:
                 print(
                     "[AUTO] Chưa có kịch bản nào đủ điều kiện mở khóa để render lúc này.",

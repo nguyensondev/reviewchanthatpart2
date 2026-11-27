@@ -176,8 +176,8 @@ if [ "$VERIFY_ONLY" = "1" ]; then
     exit 0
 fi
 
-# 6. Install & Activate Background LaunchAgent (Runs every 38 minutes = 2280s, staggered from Channel #1's 2100s!)
-echo "[LAUNCHD] Dang cai dat lich tu chay ngam $PLIST_LABEL (chu ky lech pha 38 phut = 2280s)..."
+# 6. Install & Activate Background LaunchAgent (Runs at fixed staggered minutes :18 and :53 every hour so FFmpeg never collides with Channel #1!)
+echo "[LAUNCHD] Dang cai dat lich tu chay ngam $PLIST_LABEL (lech pha co dinh phut :18 va :53 moi gio)..."
 cat > "$PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -216,8 +216,17 @@ cat > "$PLIST_PATH" <<EOF
     <integer>10</integer>
     <key>RunAtLoad</key>
     <false/>
-    <key>StartInterval</key>
-    <integer>2280</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Minute</key>
+            <integer>18</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>53</integer>
+        </dict>
+    </array>
     <key>StandardOutPath</key>
     <string>${LOG_DIR}/launchd_stdout.log</string>
     <key>StandardErrorPath</key>
@@ -307,7 +316,7 @@ if n.is_configured():
         [
             f"💻 May: {host_short} ({platform.machine()} / macOS {mac_ver})",
             f"⚙️ FFmpeg threads gioi han: {MacOSLegacyRuntime.optimal_ffmpeg_threads()} (nice +10)",
-            f"⏰ LaunchAgent: {plist_label} (chu ky lech pha 38 phut, chi hoat dong khung gio nguoi that)",
+            f"⏰ LaunchAgent: {plist_label} (lech pha co dinh phut :18 & :53 moi gio, chi hoat dong khung gio nguoi that)",
             f"📂 Thu muc: {proj_dir}",
         ],
     )

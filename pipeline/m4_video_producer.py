@@ -622,7 +622,7 @@ def render_uniform_sku_cover_jpeg(
 
     # 2. Fixed Channel Authority Header (`y=52`, customizable via CHANNEL_COVER_HEADER_VI in .env)
     f_ch = ImageFont.truetype(FONT_BOLD_PATH, 28)
-    ch_txt = (os.environ.get("CHANNEL_COVER_HEADER_VI") or "").strip().upper() or "NHÀ SẠCH TIỆN NGHI  •  CHÍNH HÃNG"
+    ch_txt = (os.environ.get("CHANNEL_COVER_HEADER_VI") or "").strip().upper() or "NHÀ CÓ ĐỒ HAY  •  CHÍNH HÃNG"
     ch_bb = d.textbbox((0, 0), ch_txt, font=f_ch)
     d.text(((w - (ch_bb[2] - ch_bb[0])) // 2, 54), ch_txt, font=f_ch, fill=header_txt_rgba)
 

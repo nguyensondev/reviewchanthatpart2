@@ -194,7 +194,7 @@ class PipelineHealthInspector:
             "",
             "⚙️ Tiến trình & Dịch vụ:",
             f"• Pipeline đang chạy ngay lúc này: {'🟢 CÓ (đang xử lý)' if pipe_running else '⚪ Không (đang nghỉ chờ chu kỳ)'}",
-            f"• Auto-Pipeline (38p/lần): {'🟢' if auto_loaded else '⚪'} {auto_desc}",
+            f"• Auto-Pipeline (phút :18 & :53): {'🟢' if auto_loaded else '⚪'} {auto_desc}",
             f"• Telegram Bot Menu: {'🟢' if bot_loaded else '⚪'} {bot_desc}",
             f"• FFmpeg / FFprobe: {'🟢 Sẵn sàng' if (ffmpeg_ok and ffprobe_ok) else '🔴 Thiếu binary'}",
             f"• Dung lượng Cache video: {cache_mb} / {CACHE_LIMIT_MB:.0f} MB",

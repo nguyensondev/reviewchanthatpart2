@@ -65,7 +65,7 @@ _KNOWN_ASCII_TECH_BRAND_TOKENS: set[str] = {
     "ok", "model", "size", "mini", "pro", "max", "plus", "ultra", "air", "auto", "smart",
     "touch", "sensor", "timer", "mode", "app", "full", "hd", "uhd", "fps", "hz", "cri", "ra", "format",
     # Common English product/model nouns embedded inside Vietnamese product titles & specs
-    "mi", "yeelight", "lumias", "levoit", "sharp", "jisulife", "philips", "midea", "simplus",
+    "mi", "yeelight", "lumias", "levoit", "sharp", "jisulife", "philips", "midea", "simplus", "gaabor",
     "dreame", "roborock", "tineco", "dyson", "karcher", "bissell", "jimmy", "uwant", "eufy",
     "ecovacs", "shark", "bosch", "scotch", "brite", "vileda", "townew", "ninestars", "eko",
     "hoto", "eraclean", "sothing", "simpleway", "laifen", "iris", "ohyama", "woozoo",

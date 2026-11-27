@@ -14,8 +14,17 @@
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/sonnguyen/Projects/giadungmini</string>
-    <key>StartInterval</key>
-    <integer>2280</integer>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Minute</key>
+            <integer>18</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>53</integer>
+        </dict>
+    </array>
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
