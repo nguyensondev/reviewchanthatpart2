@@ -1346,6 +1346,205 @@ class M4VideoProducerEngine:
         existing.append((fallback_st, fallback_et))
         return fallback_st, fallback_et, True, 120.0
 
+    async def _synth_full_video_with_gemini_tts(
+        self,
+        clause_specs: List[Tuple[AuditedBeatSegment, int, str, str, List[VideoScanSummary]]],
+        seg_dir: Path,
+        locked_voice: str,
+    ) -> Dict[int, Tuple[float, Path]]:
+        """
+        Synthesize the ENTIRE video's voiceover in **1 single Gemini 2.5 Flash TTS API call**
+        (saving ~85-90% Free-Tier RPD quota: only 2-3 requests/day instead of 25-30!) while
+        delivering seamless continuous human prosody across all 5 beats, then align-slice into
+        clause WAVs via FFmpeg `silencedetect` + proportional fallback.
+        """
+        provider_alive = getattr(self, "_tts_provider_alive", None)
+        if provider_alive is None:
+            provider_alive = {"gemini_tts": True, "tiktok": True, "edge": True}
+            self._tts_provider_alive = provider_alive
+        if not provider_alive.get("gemini_tts", True):
+            raise RuntimeError("Gemini TTS marked unavailable for this run; escalating to TikTok/Edge fallback.")
+
+        g_voice_name, g_style_prompt = GEMINI_VOICE_MAP[locked_voice]
+        norm_clauses: List[Tuple[int, str]] = []
+        for _, c_idx, tts_txt, _, _ in clause_specs:
+            ct = normalize_vietnamese_for_tts((tts_txt or "").strip()).strip().rstrip(",;:")
+            if ct and ct[-1] not in ".!?":
+                ct += "."
+            norm_clauses.append((c_idx, ct))
+
+        full_script_text = " ".join(ct for _, ct in norm_clauses if ct)
+        if not full_script_text:
+            raise RuntimeError("Empty full script text for Gemini 1-shot TTS")
+
+        raw_master = seg_dir / f"master_{locked_voice}.raw.wav"
+        clean_master = seg_dir / f"master_{locked_voice}.wav"
+        raw_master.unlink(missing_ok=True)
+        clean_master.unlink(missing_ok=True)
+
+        try:
+            def _call_gemini_full() -> bytes:
+                from dotenv import load_dotenv
+                from google import genai
+                from google.genai import types
+
+                load_dotenv()
+                api_key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+                if not api_key:
+                    raise RuntimeError("Missing GEMINI_API_KEY for Gemini 2.5 Flash TTS")
+                g_client = getattr(self, "_gemini_tts_client", None)
+                if g_client is None:
+                    g_client = genai.Client(api_key=api_key)
+                    self._gemini_tts_client = g_client
+                resp = g_client.models.generate_content(
+                    model=GEMINI_TTS_MODEL,
+                    contents=g_style_prompt + full_script_text,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=g_voice_name)
+                            )
+                        ),
+                    ),
+                )
+                pcm_bytes = resp.candidates[0].content.parts[0].inline_data.data
+                if not pcm_bytes or len(pcm_bytes) < 4000:
+                    raise RuntimeError("Gemini 1-shot TTS returned empty PCM audio")
+                return pcm_bytes
+
+            pcm_data = await asyncio.to_thread(_call_gemini_full)
+            with wave.open(str(raw_master), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                wf.writeframes(pcm_data)
+
+            # Apply studio de-breath gate + warm vocal EQ + crisp Shorts pacing (1.06x) + 0.30s opening cushion
+            _run_cmd(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(raw_master),
+                    "-af",
+                    "highpass=f=95,"
+                    "agate=threshold=0.028:ratio=5:attack=12:release=140:knee=4,"
+                    "atempo=1.06,"
+                    "equalizer=f=3000:t=q:w=1.2:g=1.2,"
+                    "equalizer=f=7000:t=q:w=1.5:g=-2.0,"
+                    "silenceremove=start_periods=1:start_silence=0.03:start_threshold=-42dB,"
+                    "areverse,silenceremove=start_periods=1:start_silence=0.05:start_threshold=-42dB,"
+                    "areverse,adelay=300|300,apad=pad_dur=0.14",
+                    "-ar",
+                    "44100",
+                    "-ac",
+                    "2",
+                    str(clean_master),
+                ]
+            )
+            raw_master.unlink(missing_ok=True)
+            total_master_dur = _get_audio_duration(clean_master)
+            if total_master_dur < 5.0:
+                raise RuntimeError(f"Gemini master audio unexpectedly short ({total_master_dur:.2f}s)")
+
+            # Detect natural inter-sentence silence midpoints via FFmpeg silencedetect
+            sd_proc = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i",
+                    str(clean_master),
+                    "-af",
+                    "silencedetect=noise=-34dB:d=0.14",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            silence_midpoints: List[float] = []
+            cur_s_start: Optional[float] = None
+            for ln in (sd_proc.stderr or "").splitlines():
+                m_st = re.search(r"silence_start:\s*([0-9.]+)", ln)
+                if m_st:
+                    cur_s_start = float(m_st.group(1))
+                m_en = re.search(r"silence_end:\s*([0-9.]+)", ln)
+                if m_en and cur_s_start is not None:
+                    s_end = float(m_en.group(1))
+                    mid = round((cur_s_start + s_end) / 2.0, 3)
+                    if 0.6 < mid < total_master_dur - 0.6:
+                        silence_midpoints.append(mid)
+                    cur_s_start = None
+
+            # Compute proportional target split points and snap cleanly to nearest natural silence pause
+            weights = [max(4, len(ct)) for _, ct in norm_clauses]
+            total_w = float(sum(weights))
+            speech_span = max(1.0, total_master_dur - 0.30)
+            boundaries: List[float] = [0.0]
+            cum_w = 0.0
+            n_clauses = len(norm_clauses)
+            for i in range(n_clauses - 1):
+                cum_w += weights[i]
+                expected_t = 0.30 + speech_span * (cum_w / total_w)
+                min_allowed = boundaries[-1] + 0.85
+                max_allowed = total_master_dur - 0.85 * (n_clauses - 1 - i)
+                snapped_t = expected_t
+                near_pauses = [
+                    p for p in silence_midpoints
+                    if min_allowed <= p <= max_allowed and abs(p - expected_t) <= 1.35
+                ]
+                if near_pauses:
+                    snapped_t = min(near_pauses, key=lambda p: abs(p - expected_t))
+                else:
+                    snapped_t = min(max_allowed, max(min_allowed, expected_t))
+                boundaries.append(round(snapped_t, 3))
+            boundaries.append(round(total_master_dur, 3))
+
+            out_map: Dict[int, Tuple[float, Path]] = {}
+            for i, (c_idx, _) in enumerate(norm_clauses):
+                st_t = boundaries[i]
+                en_t = boundaries[i + 1]
+                wav_p = seg_dir / f"c{c_idx:02d}_{locked_voice}.wav"
+                _run_cmd(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(clean_master),
+                        "-ss",
+                        f"{st_t:.3f}",
+                        "-to",
+                        f"{en_t:.3f}",
+                        "-c:a",
+                        "pcm_s16le",
+                        "-ar",
+                        "44100",
+                        "-ac",
+                        "2",
+                        str(wav_p),
+                    ]
+                )
+                out_map[c_idx] = (_get_audio_duration(wav_p), wav_p)
+            clean_master.unlink(missing_ok=True)
+            print(
+                f"  [M4.3 TTS] Gemini 1-shot '{locked_voice}' synthesized {total_master_dur:.2f}s in 1 API call "
+                f"(snapped {len(silence_midpoints)} natural pauses -> {n_clauses} clauses).",
+                flush=True,
+            )
+            return out_map
+        except Exception as exc:
+            raw_master.unlink(missing_ok=True)
+            clean_master.unlink(missing_ok=True)
+            provider_alive["gemini_tts"] = False
+            print(
+                f"  [M4.3 TTS] Gemini 2.5 Flash 1-shot TTS '{locked_voice}' unavailable ({exc}); "
+                f"falling back to TikTok TTS -> Edge Neural TTS.",
+                flush=True,
+            )
+            raise RuntimeError(f"Gemini 1-shot TTS failed ({exc})") from exc
+
     async def _synth_clause_with_locked_voice(
         self,
         text: str,
@@ -2046,22 +2245,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 clause_specs.append((b, clause_counter, tts_part, sub_part, pool))
 
         voice_candidates = _choose_voice_for_video(voices_used_today, preferred_voice=preferred_voice)
-        ordered_voice_attempts: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
+        # Priority order:
+        #   1. PRIMARY (100% Gemini 2.5 Flash 1-shot TTS — Aoede Female / Puck Male, only 1 API call/video!)
+        #   2. FALLBACK #1: TikTok TTS (BV074 / BV075)
+        #   3. FALLBACK #2: Microsoft Edge Neural TTS (HoaiMy / NamMinh)
+        #   4. EMERGENCY FALLBACK #3: Google TTS
+        gemini_primaries: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
+        tiktok_fallbacks: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
         edge_fallbacks: List[Tuple[str, Literal["FEMALE", "MALE"]]] = []
         for primary_tiktok_voice, gender, fallback_edge in voice_candidates:
             gemini_voice = "gemini_aoede" if gender == "FEMALE" else "gemini_puck"
-            # Randomly rotate within the primary pool (Gemini 2.5 Flash TTS + TikTok TTS), avoiding repeating last voice
-            primary_pair = [gemini_voice, primary_tiktok_voice]
-            if voices_used_today and voices_used_today[-1] == primary_pair[0]:
-                primary_pair.reverse()
-            elif not voices_used_today or voices_used_today[-1] != primary_pair[1]:
-                random.shuffle(primary_pair)
-            for pv in primary_pair:
-                ordered_voice_attempts.append((pv, gender))
+            gemini_primaries.append((gemini_voice, gender))
+            tiktok_fallbacks.append((primary_tiktok_voice, gender))
             edge_fallbacks.append((fallback_edge, gender))
-        # Fallback tier: Microsoft Edge Neural TTS, then emergency Google TTS only if all neural engines fail
-        ordered_voice_attempts.extend(edge_fallbacks)
-        ordered_voice_attempts.append(("google_female", "FEMALE"))
+        ordered_voice_attempts: List[Tuple[str, Literal["FEMALE", "MALE"]]] = (
+            gemini_primaries + tiktok_fallbacks + edge_fallbacks + [("google_female", "FEMALE")]
+        )
 
         sem = asyncio.Semaphore(1)
         locked_voice: Optional[str] = None
@@ -2070,19 +2269,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         for candidate_voice, gender in ordered_voice_attempts:
             try:
-                candidate_map: Dict[int, Tuple[float, Path]] = {}
                 async with sem:
-                    for _, c_idx, tts_txt, _, _ in clause_specs:
-                        mp3_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.mp3"
-                        wav_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.wav"
-                        dur = await self._synth_clause_with_locked_voice(
-                            tts_txt,
-                            mp3_p,
-                            wav_p,
+                    if candidate_voice in GEMINI_VOICE_MAP:
+                        candidate_map = await self._synth_full_video_with_gemini_tts(
+                            clause_specs=clause_specs,
+                            seg_dir=seg_dir,
                             locked_voice=candidate_voice,
-                            is_first_clause=(c_idx == 1),
                         )
-                        candidate_map[c_idx] = (dur, wav_p)
+                    else:
+                        candidate_map = {}
+                        for _, c_idx, tts_txt, _, _ in clause_specs:
+                            mp3_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.mp3"
+                            wav_p = seg_dir / f"c{c_idx:02d}_{candidate_voice}.wav"
+                            dur = await self._synth_clause_with_locked_voice(
+                                tts_txt,
+                                mp3_p,
+                                wav_p,
+                                locked_voice=candidate_voice,
+                                is_first_clause=(c_idx == 1),
+                            )
+                            candidate_map[c_idx] = (dur, wav_p)
                 tts_map = candidate_map
                 locked_voice = candidate_voice
                 locked_gender = gender

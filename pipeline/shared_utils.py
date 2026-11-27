@@ -244,6 +244,13 @@ def normalize_vietnamese_for_tts(text: str) -> str:
     s = re.sub(r"\b(\d{1,2}(?:[.,]\d{3})|\d{4,5})\s*dpi\b", _repl_thousand_unit("đi pi ai"), s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d{1,2}(?:[.,]\d{3})|\d{4,5})\s*rpm\b", _repl_thousand_unit("vòng mỗi phút"), s, flags=re.IGNORECASE)
 
+    # Units preceded by Vietnamese number words like '15 nghìn Pa', '4 nghìn mAh', '4 nghìn DPI'
+    s = re.sub(r"\b(nghìn|ngàn|trăm|triệu)\s+kpa\b", r"\1 ki lô pát can", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(nghìn|ngàn|trăm|triệu)\s+pa\b", r"\1 pát can", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(nghìn|ngàn|trăm|triệu)\s+mah\b", r"\1 mi li am pe giờ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(nghìn|ngàn|trăm|triệu)\s+dpi\b", r"\1 đi pi ai", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(nghìn|ngàn|trăm|triệu)\s+rpm\b", r"\1 vòng mỗi phút", s, flags=re.IGNORECASE)
+
     # CRI / Ra optical color rendering index
     s = re.sub(r"\bCRI\s*(?:Ra\s*)?(?:>=|>)\s*(\d+)\b", r"chỉ số hoàn màu trên \1", s, flags=re.IGNORECASE)
     s = re.sub(r"\bRa\s*(?:>=|>)\s*(\d+)\b", r"chỉ số hoàn màu trên \1", s, flags=re.IGNORECASE)
@@ -320,6 +327,14 @@ def normalize_vietnamese_for_tts(text: str) -> str:
     s = re.sub(r"\b(\d+)\s*v\b", r"\1 vôn", s, flags=re.IGNORECASE)
     s = re.sub(r"\b(\d+)\s*L\b", r"\1 lít", s)
     s = re.sub(r"(\d+)\s*%", r"\1 phần trăm", s)
+
+    # Standalone case-sensitive technical unit abbreviations even when not directly glued to a digit
+    s = re.sub(r"\bkPa\b", "ki lô pát can", s)
+    s = re.sub(r"\bPa\b", "pát can", s)
+    s = re.sub(r"\bmAh\b", "mi li am pe giờ", s)
+    s = re.sub(r"\bdB\b", "đề xi ben", s)
+    s = re.sub(r"\bDPI\b", "đi pi ai", s)
+    s = re.sub(r"\bRPM\b", "vòng mỗi phút", s)
 
     # Smooth tech connectors & common acronyms for Vietnamese TTS
     s = re.sub(r"\bUSB[-\s]*C\b", "USB Type C", s, flags=re.IGNORECASE)
