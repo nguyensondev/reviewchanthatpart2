@@ -359,12 +359,26 @@ def audit_tts_readability(text: str) -> List[str]:
     if "_" in s:
         issues.append("Chứa dấu gạch dưới '_' trong lời thoại TTS (dễ đọc lỗi mã sản phẩm).")
 
-    # 2. Ugly long factory SKU codes read letter-by-letter (e.g., VS-B01V1, YLTD003, CKS321GRN)
-    ugly_codes = re.findall(r"\b(?:[A-Z]{2,}-[A-Z0-9]{4,}|[A-Z]{4,}\d{2,}[A-Z0-9]*)\b", s)
+    # 2. Ugly long factory SKU codes read letter-by-letter (e.g., JPF12AV2, KTB-3466, VS-B01V1, YLTD003, CKS321GRN)
+    ugly_codes = re.findall(
+        r"\b(?=[A-Z0-9-]{5,}\b)(?:[A-Z]{2,}\d+[A-Z0-9-]*|[A-Z]{1,4}-[A-Z0-9]{3,})\b",
+        s,
+    )
     if ugly_codes:
         issues.append(
             f"Chứa mã linh kiện/xuất xưởng dài khó đọc tự nhiên ({', '.join(ugly_codes[:3])}); "
-            "nên đọc gọn bằng tên thương hiệu + dòng máy thân thiện."
+            "nên đọc gọn bằng tên thương hiệu + dòng máy thân thiện (VD: 'mẫu máy hút ẩm nhà Daikin')."
+        )
+
+    # 2b. Long untranslated English product phrases (>= 3 consecutive English product words like 'Car Vacuum Cleaner')
+    en_phrases = re.findall(
+        r"\b(?:[A-Z][a-z]{2,}\s+){2,}[A-Z][a-z]{2,}\b",
+        s,
+    )
+    if en_phrases:
+        issues.append(
+            f"Chứa cụm tên tiếng Anh dài gây cứng giọng TTS ({', '.join(en_phrases[:2])}); "
+            "hãy Việt hóa tự nhiên trong lời thoại TTS."
         )
 
     # 3. Unpunctuated run-on segments (> 24 words without any pause . ! ? , ; :)

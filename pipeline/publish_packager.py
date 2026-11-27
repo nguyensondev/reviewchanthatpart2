@@ -48,6 +48,7 @@ from pipeline.shared_utils import (
     sanitize_youtube_metadata_text,
     sanitize_youtube_tags,
     strip_accents as _strip_accents,
+    truncate_words_clean,
 )
 from pipeline.sku_registry import SKURegistryManager
 from pipeline.video_registry import VideoRegistryEntry, VideoRegistryManager
@@ -537,7 +538,19 @@ class PublishPackager:
         else:
             base_title = entry.title_vi.replace("_", " ").strip()
 
-        yt_title = sanitize_youtube_metadata_text(f"{base_title[:76].strip()} #Shorts", max_chars=95)
+        clean_base_for_yt = base_title.strip()
+        if len(clean_base_for_yt) > 78:
+            # Prefer trimming cleanly on a word boundary and removing dangling Vietnamese connectors ('Có', 'Có Đáng', 'Cho', 'Và')
+            trimmed = truncate_words_clean(clean_base_for_yt, max_chars=78)
+            trimmed = re.sub(
+                r"\s+(?:có\s+đáng|có\s+nên|có|đáng|không|cho|với|của|và|tại|nhưng|mà)\s*$",
+                "",
+                trimmed,
+                flags=re.IGNORECASE,
+            ).strip(" :-–,")
+            clean_base_for_yt = trimmed or truncate_words_clean(clean_base_for_yt, max_chars=78)
+
+        yt_title = sanitize_youtube_metadata_text(f"{clean_base_for_yt} #Shorts", max_chars=95)
         fb_title = base_title.replace("->", "→")
         return yt_title, fb_title
 
@@ -746,7 +759,14 @@ class PublishPackager:
                 if trend_opp.seo_context_prefix_vi:
                     prefix = trend_opp.seo_context_prefix_vi.strip().rstrip(":-")
                     base_no_shorts = yt_title.replace("#Shorts", "").strip()
-                    candidate_title = sanitize_youtube_metadata_text(f"{prefix}: {base_no_shorts}", max_chars=87)
+                    cand_raw = sanitize_youtube_metadata_text(f"{prefix}: {base_no_shorts}", max_chars=200)
+                    candidate_title = truncate_words_clean(cand_raw, max_chars=84)
+                    candidate_title = re.sub(
+                        r"\s+(?:có\s+đáng|có\s+nên|có|đáng|không|cho|với|của|và)\s*$",
+                        "",
+                        candidate_title,
+                        flags=re.IGNORECASE,
+                    ).strip(" :-–,")
                     yt_title = f"{candidate_title} #Shorts"
                 if trend_opp.need_pain_point_vi:
                     trend_lead_sentence = f"🔥 {trend_opp.need_pain_point_vi.strip()}\n"
