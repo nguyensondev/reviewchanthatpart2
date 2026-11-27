@@ -35,16 +35,24 @@ MAX_SKU_COOLDOWN_DAYS = 7
 def classify_micro_scene(domain: DomainId, category_id: str, product_name_vi: str = "") -> MicroSceneId:
     """Deterministically assign a canonical `MicroSceneId` based on domain and category/product type."""
     text = f"{category_id} {product_name_vi}".lower()
-    if domain == "TECH_DESK":
-        power_kws = ("hub", "charger", "gan", "cable", "cap", "sac", "adapter", "dock", "power", "usb_c_hub")
-        if any(k in text for k in power_kws):
-            return "DESK_POWER_CONNECTIVITY"
-        return "DESK_ERGONOMIC_WORKFLOW"
+    if domain == "CLEANING_CARE":
+        bath_surface_kws = (
+            "scrubber", "choi_co", "nha_tam", "soap", "dispenser", "xa_phong", "trash", "thung_rac",
+            "ultrasonic", "sieu_am", "window", "wiper", "lau_kinh", "lint", "long_xu", "duster", "thoi_bui",
+        )
+        if any(k in text for k in bath_surface_kws):
+            if "lint" in text or "long_xu" in text:
+                return "GARMENT_SHOE_FABRIC_CARE"
+            return "BATHROOM_SURFACE_HYGIENE"
+        return "FLOOR_BED_DEEP_CLEANING"
     else:
-        prep_kws = ("scale", "can", "thermometer", "nhiet_ke", "frother", "coffee", "timer", "measuring", "chopper", "xay")
-        if any(k in text for k in prep_kws):
-            return "KITCHEN_PRECISION_PREP"
-        return "KITCHEN_COOKING_STORAGE"
+        garment_kws = (
+            "steamer", "ban_ui", "ban_la", "shoe_dryer", "say_giay", "clothes_dryer",
+            "say_quan_ao", "lint", "long_xu", "hair_dryer", "say_toc", "flosser", "tam_nuoc",
+        )
+        if any(k in text for k in garment_kws):
+            return "GARMENT_SHOE_FABRIC_CARE"
+        return "AIR_CLIMATE_COMFORT_MINI"
 
 
 class SKURegistryManager:

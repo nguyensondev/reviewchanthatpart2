@@ -105,7 +105,7 @@ class FactualClaimReference(BaseModel):
 class ScriptDraftItem(BaseModel):
     script_id: str
     script_format: ScriptFormat
-    domain: DomainId = Field(default="KITCHEN_TECH", description="Chủ đề gốc của kịch bản (TECH_DESK hoặc KITCHEN_TECH)")
+    domain: DomainId = Field(default="CLEANING_CARE", description="Chủ đề gốc của kịch bản (CLEANING_CARE hoặc MINI_APPLIANCE)")
     category_id: str = Field(default="general", description="Mã nhóm công năng chính của kịch bản")
     narrative_angle: NarrativeAngle = Field(
         default="PAIN_POINT_REALITY_CHECK",
@@ -181,7 +181,7 @@ class LLMGeneratedBeat(BaseModel):
 
 class LLMGeneratedScriptDraft(BaseModel):
     script_format: ScriptFormat
-    domain: DomainId = Field(default="KITCHEN_TECH", description="Chủ đề gốc của kịch bản (TECH_DESK hoặc KITCHEN_TECH)")
+    domain: DomainId = Field(default="CLEANING_CARE", description="Chủ đề gốc của kịch bản (CLEANING_CARE hoặc MINI_APPLIANCE)")
     category_id: str = Field(default="general", description="Mã nhóm công năng chính của kịch bản")
     narrative_angle: LLMNarrativeAngle = Field(
         default="REVERSE_CAVEAT_FIRST",

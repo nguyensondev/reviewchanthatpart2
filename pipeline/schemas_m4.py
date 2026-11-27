@@ -39,7 +39,7 @@ class SocialPostPack(BaseModel):
 class RenderedVideoItem(BaseModel):
     script_id: str
     script_format: str
-    domain: str = "KITCHEN_TECH"
+    domain: str = "CLEANING_CARE"
     category_id: str = "general"
     narrative_angle: str = "PAIN_POINT_REALITY_CHECK"
     title_vi: str

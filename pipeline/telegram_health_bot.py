@@ -144,8 +144,8 @@ class PipelineHealthInspector:
         now_str = dt.datetime.now().astimezone().strftime("%d/%m/%Y %H:%M:%S")
 
         pipe_running = _check_pipeline_running_now()
-        auto_loaded, auto_desc = _check_launchd_service("com.congnghe.autopipeline")
-        bot_loaded, bot_desc = _check_launchd_service("com.congnghe.telegrambot")
+        auto_loaded, auto_desc = _check_launchd_service("com.giadungmini.autopipeline")
+        bot_loaded, bot_desc = _check_launchd_service("com.giadungmini.telegrambot")
 
         ffmpeg_ok = bool(
             (PROJECT_ROOT / "bin" / "ffmpeg").exists() or shutil.which("ffmpeg")
@@ -194,7 +194,7 @@ class PipelineHealthInspector:
             "",
             "⚙️ Tiến trình & Dịch vụ:",
             f"• Pipeline đang chạy ngay lúc này: {'🟢 CÓ (đang xử lý)' if pipe_running else '⚪ Không (đang nghỉ chờ chu kỳ)'}",
-            f"• Auto-Pipeline (35p/lần): {'🟢' if auto_loaded else '⚪'} {auto_desc}",
+            f"• Auto-Pipeline (38p/lần): {'🟢' if auto_loaded else '⚪'} {auto_desc}",
             f"• Telegram Bot Menu: {'🟢' if bot_loaded else '⚪'} {bot_desc}",
             f"• FFmpeg / FFprobe: {'🟢 Sẵn sàng' if (ffmpeg_ok and ffprobe_ok) else '🔴 Thiếu binary'}",
             f"• Dung lượng Cache video: {cache_mb} / {CACHE_LIMIT_MB:.0f} MB",

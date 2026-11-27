@@ -1,7 +1,7 @@
 """
 Data Contract & Pydantic Schemas for Module M0 (Autonomous Multi-Brand SKU Discovery).
 
-M0 knows ONLY the 2 root domains (`TECH_DESK`, `KITCHEN_TECH`), its own history (`data/m0_history.json`),
+M0 knows ONLY the 2 root domains (`CLEANING_CARE`, `MINI_APPLIANCE`), its own history (`data/m0_history.json`),
 and optional local Shopee Affiliate CSV files. It outputs `data/m0_candidate_pool.json` as a strict
 black-box contract for Module M1.
 """
@@ -11,11 +11,11 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-DomainId = Literal["TECH_DESK", "KITCHEN_TECH"]
+DomainId = Literal["CLEANING_CARE", "MINI_APPLIANCE"]
 
 CandidateArchetype = Literal[
-    "BRANDED_MAINSTREAM",     # Thương hiệu phổ thông uy tín (VD: Lock&Lock, Inochi, Ugreen, Baseus, Bear, Elmich)
-    "BRANDED_PREMIUM",        # Thương hiệu cao cấp / chuyên sâu (VD: Kai, HyperWork, Anker, WMF, Joseph Joseph)
+    "BRANDED_MAINSTREAM",     # Thương hiệu phổ thông uy tín (VD: Deerma, Xiaomi, Lock&Lock, Inochi, Simplus, Bear, Lumias)
+    "BRANDED_PREMIUM",        # Thương hiệu cao cấp / chuyên sâu (VD: Philips, Panasonic, Dreame, Roborock, Tineco, Dyson, Karcher, Levoit)
     "OEM_GENERIC",            # Hàng OEM không thương hiệu / giá rẻ làm mốc đối chiếu trung vị ngành hàng
     "MULTI_MODEL_AMBIGUOUS",  # Tin đăng gộp nhiều mã lập lờ / treo đầu dê bán thịt chó (đánh dấu để M1 lọc bỏ)
 ]
@@ -109,9 +109,9 @@ class DiscoveredCandidateSKU(BaseModel):
 
 
 class FunctionalCategoryGroup(BaseModel):
-    category_id: str = Field(..., description="Mã nhóm công năng (VD: pull_cord_garlic_chopper)")
-    domain: DomainId = Field(default="KITCHEN_TECH", description="Chủ đề gốc của nhóm công năng (TECH_DESK hoặc KITCHEN_TECH)")
-    category_name_vi: str = Field(..., description="Tên nhóm công năng tiếng Việt (VD: Cối xay tỏi ớt kéo tay)")
+    category_id: str = Field(..., description="Mã nhóm công năng (VD: uv_mattress_dust_mite_vacuum)")
+    domain: DomainId = Field(default="CLEANING_CARE", description="Chủ đề gốc của nhóm công năng (CLEANING_CARE hoặc MINI_APPLIANCE)")
+    category_name_vi: str = Field(..., description="Tên nhóm công năng tiếng Việt (VD: Máy hút bụi giường nệm diệt khuẩn tia UV)")
     problem_solved_vi: str = Field(..., description="Vấn đề thực tế mà nhóm sản phẩm này giải quyết")
     generic_search_queries_used: List[str] = Field(
         default_factory=list,
@@ -131,7 +131,7 @@ class M0CandidatePoolOutput(BaseModel):
     schema_version: str = Field(default="1.0.0", description="Phiên bản schema hợp đồng dữ liệu M0 -> M1")
     run_id: str = Field(..., description="ID của lần chạy M0")
     generated_at: str = Field(..., description="Thời gian tạo (ISO 8601)")
-    domain: DomainId = Field(..., description="Chủ đề gốc: TECH_DESK hoặc KITCHEN_TECH")
+    domain: DomainId = Field(..., description="Chủ đề gốc: CLEANING_CARE hoặc MINI_APPLIANCE")
     domain_name_vi: str = Field(..., description="Tên chủ đề gốc tiếng Việt")
     sub_niche_id: str = Field(..., description="Mã ngách chủ đề cụ thể mà M0 tự chọn")
     sub_niche_name_vi: str = Field(..., description="Tên ngách chủ đề tiếng Việt")
@@ -148,13 +148,13 @@ class M0CandidatePoolOutput(BaseModel):
 # --- Internal LLM Structured Output Schemas (for M0.1 and M0.3) ---
 
 class LLMPlannedCategoryQuery(BaseModel):
-    category_id: str = Field(..., description="Slug tiếng Anh ngắn gọn (VD: pull_cord_garlic_chopper)")
-    domain: DomainId = Field(..., description="Chủ đề gốc của nhóm công năng này: TECH_DESK hoặc KITCHEN_TECH")
+    category_id: str = Field(..., description="Slug tiếng Anh ngắn gọn (VD: cordless_electric_spin_scrubber)")
+    domain: DomainId = Field(..., description="Chủ đề gốc của nhóm công năng này: CLEANING_CARE hoặc MINI_APPLIANCE")
     category_name_vi: str = Field(..., description="Tên nhóm sản phẩm theo công năng (KHÔNG chứa tên hãng)")
     problem_solved_vi: str = Field(..., description="Nỗi đau / vấn đề thực tế nhóm sản phẩm này giải quyết")
     generic_web_queries_vi: List[str] = Field(
         ...,
-        description="2-3 từ khóa tìm kiếm web khách quan, KHÔNG chứa tên thương hiệu (VD: 'cối xay tỏi ớt kéo tay loại nào tốt', 'so sánh các loại bình xịt dầu ăn phun sương')",
+        description="2-3 từ khóa tìm kiếm web khách quan, KHÔNG chứa tên thương hiệu (VD: 'máy hút bụi giường nệm tia UV loại nào tốt', 'so sánh bàn ủi hơi nước cầm tay gấp gọn')",
     )
     generic_youtube_queries_vi: List[str] = Field(
         ...,
@@ -164,7 +164,7 @@ class LLMPlannedCategoryQuery(BaseModel):
 
 class LLMSubNichePlanResponse(BaseModel):
     domain: DomainId
-    sub_niche_id: str = Field(..., description="Slug định danh ngách chủ đề (VD: quick_spice_prep_tools)")
+    sub_niche_id: str = Field(..., description="Slug định danh ngách chủ đề (VD: deep_bedroom_hygiene_care)")
     sub_niche_name_vi: str = Field(..., description="Tên ngách chủ đề hấp dẫn bằng tiếng Việt")
     problem_context_vi: str = Field(..., description="Mô tả ngắn gọn vấn đề thực tế người dùng gặp phải")
     planner_reasoning_vi: str = Field(..., description="Giải thích vì sao chọn ngách này (tránh trùng lịch sử, tính thực dụng cao)")
@@ -175,9 +175,9 @@ class LLMSubNichePlanResponse(BaseModel):
 
 
 class LLMExtractedCandidateItem(BaseModel):
-    candidate_id: str = Field(..., description="Slug ngắn gọn (VD: locknlock_cks321, inochi_yoko_chopper, oem_mini_chopper)")
-    brand: str = Field(..., description="Thương hiệu (VD: Lock&Lock, Inochi, Elmich, Bear, Kai, Ugreen, Baseus, HyperWork, OEM)")
-    model_code: Optional[str] = Field(default=None, description="Mã model chính xác nếu có (VD: CKS321, EJM416, CM01)")
+    candidate_id: str = Field(..., description="Slug ngắn gọn (VD: deerma_cm800, philips_sth3020, oem_mini_steamer)")
+    brand: str = Field(..., description="Thương hiệu (VD: Deerma, Xiaomi, Philips, Dreame, Lock&Lock, Inochi, Levoit, Simplus, OEM)")
+    model_code: Optional[str] = Field(default=None, description="Mã model chính xác nếu có (VD: CM800, STH3020, Core Mini)")
     product_name_vi: str = Field(..., description="Tên sản phẩm rõ ràng bằng tiếng Việt")
     archetype: CandidateArchetype
     estimated_market_price_vnd: int = Field(..., description="Giá thị trường ước tính hợp lý bằng VNĐ (VD: 89000)")

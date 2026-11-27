@@ -3,8 +3,8 @@ Master Daily Pipeline Orchestrator — Step C (`pipeline/run_daily_pipeline.py`)
 
 Coordinates modular execution of:
   - Planning Batch (`M0 -> M1 -> M1.5 -> M2 -> M3`): Runs at most once per day when the
-    eligible `SCRIPT_APPROVED` queue needs replenishment, rotating across 18+ functional
-    categories (`TECH_DESK` + `KITCHEN_TECH`) and blocking any category/SKU on 3-7 day cooldown.
+    eligible `SCRIPT_APPROVED` queue needs replenishment, rotating across 24 functional
+    categories (`CLEANING_CARE` + `MINI_APPLIANCE`) and blocking any category/SKU on 3-7 day cooldown.
   - Render Worker (`M4`): Renders at most 1 video per invocation (up to 3 videos/day),
     enforcing the 2-hour post-render rest (`COOLDOWN_RESTING_2H`) AND the random 3-7 day
     per-SKU cooldown (`next_eligible_at`) so no SKU ever appears in both a Solo video and
@@ -183,13 +183,13 @@ def print_pipeline_status() -> None:
             flush=True,
         )
 
-    blocked_cats, fresh_tech, fresh_kitchen = m0_engine._get_blocked_and_fresh_categories(history)
+    blocked_cats, fresh_cleaning, fresh_appliance = m0_engine._get_blocked_and_fresh_categories(history)
     print("\n--- [3] XOAY VÒNG DANH MỤC THÔNG MINH M0 (`CATEGORY_ROTATION_TAXONOMY`) ---", flush=True)
     print(f"• Danh mục đang khóa (vừa chạy / đang nghỉ 3-7 ngày): {sorted(blocked_cats)}", flush=True)
     print(
         f"• Danh mục mới sẵn sàng cho lần quét kế tiếp: "
-        f"TECH_DESK={[c['category_id'] for c in fresh_tech[:3]]} | "
-        f"KITCHEN_TECH={[c['category_id'] for c in fresh_kitchen[:3]]}",
+        f"CLEANING_CARE={[c['category_id'] for c in fresh_cleaning[:3]]} | "
+        f"MINI_APPLIANCE={[c['category_id'] for c in fresh_appliance[:3]]}",
         flush=True,
     )
 

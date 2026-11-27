@@ -1,88 +1,39 @@
 {
-  "version": "1.0.0",
-  "description": "Danh sách trắng (Whitelist) các Shop ID chính hãng (Shopee Mall / Official Store / Ủy quyền chính thức) trên Shopee Việt Nam để đảm bảo 100% không bao giờ gắn nhầm link vào shop trôi nổi.",
+  "version": "2.0.0",
+  "description": "Danh sách trắng (Whitelist) các Shop ID chính hãng & thương hiệu Shopee Mall ngành Đồ Vệ Sinh & Gia Dụng Mini trên Shopee Việt Nam để đảm bảo 100% không bao giờ gắn nhầm link vào shop trôi nổi.",
   "brands": {
-    "Logitech": {
-      "brand_name": "Logitech",
-      "official_shop_ids": ["52679373", "10973"],
-      "official_shop_usernames": ["logitech_official_shop", "logitech.vn"],
-      "prefer_mall_search": true,
-      "verified_sku_items": {
-        "logitech_lift_vertical": {
-          "shop_id": "52679373",
-          "item_id": "18804735595",
-          "shop_name": "Logitech Official Shop (Shopee Mall)",
-          "product_name": "Chuột công thái học không dây Logitech Lift Vertical - Bluetooth | Logi Bolt USB"
-        }
-      }
-    },
-    "Baseus": {
-      "brand_name": "Baseus",
-      "official_shop_ids": ["1118576800", "995454111", "352912552", "1016197332"],
-      "official_shop_usernames": ["baseus.official.mall.vn", "baseusofficial.vietnam", "baseus.flagship.vn", "baseus.vn"],
-      "prefer_mall_search": true,
-      "verified_sku_items": {
-        "baseus_i_wok2": {
-          "shop_id": "1118576800",
-          "item_id": "24256337154",
-          "shop_name": "Baseus Official Mall (Shopee Mall)",
-          "product_name": "Đèn Treo Màn Hình Chống Chói Bảo Vệ Mắt Baseus i-wok2 Series Screen Hanging Light"
-        }
-      }
-    },
-    "Tanita": {
-      "brand_name": "Tanita",
-      "official_shop_ids": ["61265821"],
-      "official_shop_usernames": ["tanita_vietnam"],
-      "prefer_mall_search": false,
-      "verified_sku_items": {
-        "tanita_kd_series": {
-          "shop_id": "61265821",
-          "item_id": "6878146390",
-          "shop_name": "Tanita Authorized Store (61265821)",
-          "product_name": "Cân điện tử nhà bếp TANITA Nhật Bản dòng KD-Series chính xác cao"
-        }
-      }
-    },
-    "Lock&Lock": {
-      "brand_name": "Lock&Lock",
-      "official_shop_ids": ["55771655", "1639516234", "1653171136"],
-      "official_shop_usernames": ["locknlockvn"],
+    "Deerma": {
+      "brand_name": "Deerma",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["deerma_official_store", "deerma.vn"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
-    "Ugreen": {
-      "brand_name": "Ugreen",
-      "official_shop_ids": ["65589552", "173392916"],
-      "official_shop_usernames": ["ugreen.vn", "ugreenshop", "ugreen_vietnam_store", "ugreen_flagship_store"],
+    "Xiaomi": {
+      "brand_name": "Xiaomi",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["xiaomi_official_store_vn", "xiaomivietnam"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
-    "Anker": {
-      "brand_name": "Anker",
-      "official_shop_ids": ["16693352", "39556157"],
-      "official_shop_usernames": ["ankermall.vn", "anker_vietnam_official"],
+    "Dreame": {
+      "brand_name": "Dreame",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["dreame_official_store", "dreamevietnam"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
-    "Inochi": {
-      "brand_name": "Inochi",
-      "official_shop_ids": ["265159609"],
-      "official_shop_usernames": ["inochiofficial", "inochi.official.store", "inochimall", "inochivietnammall"],
+    "Roborock": {
+      "brand_name": "Roborock",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["roborock_vietnam", "roborock.official"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
-    "Elmich": {
-      "brand_name": "Elmich",
-      "official_shop_ids": ["88201679"],
-      "official_shop_usernames": ["elmich_official_store", "elmich.vn"],
-      "prefer_mall_search": true,
-      "verified_sku_items": {}
-    },
-    "Bear": {
-      "brand_name": "Bear",
-      "official_shop_ids": ["231554911"],
-      "official_shop_usernames": ["bear_official_store", "bearvietnam.vn"],
+    "Tineco": {
+      "brand_name": "Tineco",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["tineco_vietnam", "tineco_official_store"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
@@ -93,17 +44,143 @@
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
-    "HyperWork": {
-      "brand_name": "HyperWork",
-      "official_shop_ids": ["435689122"],
-      "official_shop_usernames": ["hyperwork.vn", "hyperwork_official"],
+    "Panasonic": {
+      "brand_name": "Panasonic",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["panasonic_official", "panasonicvietnam"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     },
-    "Keychron": {
-      "brand_name": "Keychron",
-      "official_shop_ids": ["291847102"],
-      "official_shop_usernames": ["keychron_vietnam", "siliconz.vn"],
+    "Tefal": {
+      "brand_name": "Tefal",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["tefal_vn_official"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Lock&Lock": {
+      "brand_name": "Lock&Lock",
+      "official_shop_ids": ["55771655", "1639516234", "1653171136"],
+      "official_shop_usernames": ["locknlockvn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Inochi": {
+      "brand_name": "Inochi",
+      "official_shop_ids": ["265159609"],
+      "official_shop_usernames": ["inochiofficial", "inochi.official.store", "inochimall", "inochivietnammall"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Bear": {
+      "brand_name": "Bear",
+      "official_shop_ids": ["231554911"],
+      "official_shop_usernames": ["bear_official_store", "bearvietnam.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Elmich": {
+      "brand_name": "Elmich",
+      "official_shop_ids": ["88201679"],
+      "official_shop_usernames": ["elmich_official_store", "elmich.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Levoit": {
+      "brand_name": "Levoit",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["levoit_official_store", "levoitvietnam"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Lumias": {
+      "brand_name": "Lumias",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["lumias_official_store", "lumiasvietnam"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Simplus": {
+      "brand_name": "Simplus",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["simplus_vn", "simplus_official_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "JisuLife": {
+      "brand_name": "JisuLife",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["jisulife_official_vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Laifen": {
+      "brand_name": "Laifen",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["laifen_vietnam", "laifen_official"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Karcher": {
+      "brand_name": "Karcher",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["karchervietnam"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Electrolux": {
+      "brand_name": "Electrolux",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["electrolux_vietnam"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Sharp": {
+      "brand_name": "Sharp",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["sharp_official_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Sunhouse": {
+      "brand_name": "Sunhouse",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["sunhouse_official_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "BlueStone": {
+      "brand_name": "BlueStone",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["bluestone_official_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Comet": {
+      "brand_name": "Comet",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["comet_official_store"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "HOTO": {
+      "brand_name": "HOTO",
+      "official_shop_ids": [],
+      "official_shop_usernames": ["hoto_official_vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Baseus": {
+      "brand_name": "Baseus",
+      "official_shop_ids": ["1118576800", "995454111", "352912552", "1016197332"],
+      "official_shop_usernames": ["baseus.official.mall.vn", "baseusofficial.vietnam", "baseus.flagship.vn", "baseus.vn"],
+      "prefer_mall_search": true,
+      "verified_sku_items": {}
+    },
+    "Ugreen": {
+      "brand_name": "Ugreen",
+      "official_shop_ids": ["65589552", "173392916"],
+      "official_shop_usernames": ["ugreen.vn", "ugreenshop", "ugreen_vietnam_store", "ugreen_flagship_store"],
       "prefer_mall_search": true,
       "verified_sku_items": {}
     }

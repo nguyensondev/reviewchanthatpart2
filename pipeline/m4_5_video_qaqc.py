@@ -134,7 +134,7 @@ class M45VideoQAQCEngine:
         report_path: Path = OUTPUT_M4_5_REPORT_PATH,
         storyboard_dir: Path = STORYBOARD_DIR,
     ) -> None:
-        self.llm = llm_client or FreeTierGeminiClient()
+        self._llm: Optional[FreeTierGeminiClient] = llm_client
         self.m4_output_path = m4_output_path
         self.report_path = report_path
         self.storyboard_dir = storyboard_dir
@@ -142,6 +142,12 @@ class M45VideoQAQCEngine:
         self.brand_gate = OfficialBrandVideoGate()
         self.video_registry = VideoRegistryManager()
         self.sku_registry = SKURegistryManager()
+
+    @property
+    def llm(self) -> FreeTierGeminiClient:
+        if self._llm is None:
+            self._llm = FreeTierGeminiClient()
+        return self._llm
 
     def _load_previous_approved_cache(self) -> Dict[Tuple[str, int], AuditedVideoQAQCItem]:
         """Cache previously approved `(script_id, file_size_bytes)` so unchanged videos aren't re-audited."""
@@ -495,7 +501,7 @@ Hãy quan sát kỹ tấm ảnh Storyboard 6 khung hình đính kèm và xuất 
         report = M45VideoQAQCReport(
             m4_5_run_id=run_id,
             generated_at=now_iso,
-            llm_models_used=self.llm.models_used_history,
+            llm_models_used=self._llm.models_used_history if self._llm else [],
             total_audited=len(audited_items),
             approved_video_count=approved_cnt,
             rejected_video_count=rejected_cnt,

@@ -306,46 +306,46 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
 
     bad_llm_draft = LLMGeneratedScriptDraft(
         script_format="SINGLE_SKU_DEEP_DIVE",
-        domain="TECH_DESK",
-        category_id="ergonomic_vertical_mouse",
+        domain="CLEANING_CARE",
+        category_id="uv_mattress_dust_mite_vacuum",
         narrative_angle="REVERSE_CAVEAT_FIRST",
-        title_vi="Review chuot cong thai hoc Logitech Lift Vertical",
-        hook_title_short_vi="Het moi co tay ngay",
-        selection_rationale_vi="Phan tich chuot doc chong moi co tay",
-        primary_sku_ids=["logitech_vertical_lift"],
+        title_vi="Review may hut bui giuong nem Deerma CM800",
+        hook_title_short_vi="Het ngua lung ngay",
+        selection_rationale_vi="Phan tich may hut mat bui tia UV",
+        primary_sku_ids=["deerma_cm800"],
         runner_up_sku_ids_referenced=[],
         foil_sku_ids_referenced=[],
         beats=[
             LLMGeneratedBeat(
                 beat_index=1,
                 beat_type="HOOK_FOIL_WARNING",
-                target_candidate_id="logitech_vertical_lift",
-                voiceover_vi="Ngoi may tinh ca ngay ma co tay dau nhuc voi gia 420.000đ.",
-                on_screen_text_vi="Chuot re truot lien tuc",
-                visual_instruction_vi="Canh quay ban lam viec",
+                target_candidate_id="deerma_cm800",
+                voiceover_vi="Nam ngu ca dem ma lung cu ngua ngay vi dung may re 150.000đ.",
+                on_screen_text_vi="May re hut yeu xiu",
+                visual_instruction_vi="Canh quay giuong nem",
             )
         ],
     )
     assert len(_validate_pydantic_vietnamese_fields(bad_llm_draft)) >= 4
 
     fake_clip = YouTubeEvidenceClip(
-        video_id="kWEbfrHi65A",
-        url="https://www.youtube.com/watch?v=kWEbfrHi65A",
-        title="Lift",
-        channel="Logitech",
+        video_id="deerma_test_01",
+        url="https://www.youtube.com/watch?v=deerma_test_01",
+        title="Deerma CM800 Dust Mite Vacuum",
+        channel="Deerma Official",
         duration_sec=60,
     )
     poisoned_m2_draft = ScriptDraftItem(
         script_id="s_poisoned_unaccented",
         script_format="SINGLE_SKU_DEEP_DIVE",
-        domain="TECH_DESK",
-        category_id="ergonomic_vertical_mouse",
+        domain="CLEANING_CARE",
+        category_id="uv_mattress_dust_mite_vacuum",
         narrative_angle="PAIN_POINT_REALITY_CHECK",
-        title_vi="Review chuot cong thai hoc Logitech Lift Vertical",
-        hook_title_short_vi="Het moi co tay",
-        hook_preview_vi="Ngoi may tinh ca ngay...",
+        title_vi="Review may hut bui giuong nem Deerma CM800",
+        hook_title_short_vi="Het mat bui ngay",
+        hook_preview_vi="Nam ngu ca dem...",
         selection_rationale_vi="Test",
-        primary_sku_ids=["logitech_vertical_lift"],
+        primary_sku_ids=["deerma_cm800"],
         total_duration_sec=35.0,
         total_word_count=130,
         average_speaking_rate_wps=3.7,
@@ -356,11 +356,11 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
                 start_sec=(i - 1) * 7.0,
                 end_sec=i * 7.0,
                 duration_sec=7.0,
-                target_candidate_id="logitech_vertical_lift",
-                voiceover_vi="Ngoi may tinh ca ngay ma co tay cu nhuc moi vi dung chuot re 120.000đ kem chat luong.",
+                target_candidate_id="deerma_cm800",
+                voiceover_vi="Nam ngu ca dem ma lung cu ngua ngay vi dung may re 150.000đ kem chat luong.",
                 word_count=26,
                 estimated_speaking_rate_wps=3.7,
-                on_screen_text_vi="Chuot re truot con tro",
+                on_screen_text_vi="May re hut yeu xiu",
                 visual_instruction_vi="Canh quay",
                 source_youtube_clip=fake_clip,
             )
@@ -379,20 +379,22 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
         flush=True,
     )
 
-    # 5. Upgrade-1 Verification: Smart 6-Format Rotation + 3 M4 PIL Visual End-Cards
+    # 5. Upgrade-1 Verification: Smart 6-Format Rotation + 3 M4 PIL Visual End-Cards + 9:16 Cover
+    from PIL import Image
     from pipeline.m2_script_gen import UPGRADE_1_ANGLE_POOL, recommend_angles_for_category
     from pipeline.m4_video_producer import (
         _render_pil_buy_skip_card,
         _render_pil_score_verdict_card,
         _render_pil_versus_2col_card,
         _select_end_card_type,
+        render_uniform_sku_cover_jpeg,
     )
 
     assert len(UPGRADE_1_ANGLE_POOL) == 6
-    assert recommend_angles_for_category("gan_desktop_fast_charger_station", "TECH_DESK")[0] == "SPEC_TRAP_AND_HIDDEN_COST"
-    assert recommend_angles_for_category("screen_hanging_light_bar", "TECH_DESK")[0] == "HYPE_VS_REALITY_TEST"
-    assert recommend_angles_for_category("handheld_rechargeable_milk_frother", "KITCHEN_TECH")[0] == "ANTI_DUST_DRAWER_TEST"
-    assert recommend_angles_for_category("ergonomic_vertical_mouse", "TECH_DESK")[0] == "HABIT_DIAGNOSIS_STORY"
+    assert recommend_angles_for_category("uv_mattress_dust_mite_vacuum", "CLEANING_CARE")[0] == "SPEC_TRAP_AND_HIDDEN_COST"
+    assert recommend_angles_for_category("spray_flat_mop_microfiber", "CLEANING_CARE")[0] == "HYPE_VS_REALITY_TEST"
+    assert recommend_angles_for_category("cordless_electric_spin_scrubber", "CLEANING_CARE")[0] == "ANTI_DUST_DRAWER_TEST"
+    assert recommend_angles_for_category("handheld_foldable_garment_steamer", "MINI_APPLIANCE")[0] == "HABIT_DIAGNOSIS_STORY"
 
     assert _select_end_card_type("REVERSE_CAVEAT_FIRST", "s1") == "BUY_SKIP_CARD"
     assert _select_end_card_type("SPEC_TRAP_AND_HIDDEN_COST", "s2") == "VERSUS_2COL_CARD"
@@ -402,12 +404,19 @@ def verify_criterion_5_anti_spam_human_behavior() -> None:
         c1 = Path(card_td) / "c1.png"
         c2 = Path(card_td) / "c2.png"
         c3 = Path(card_td) / "c3.png"
-        _render_pil_score_verdict_card(c1, 8.8, "Baseus i-wok2", "Ánh sáng bất đối xứng chống chói thật", "~420k")
-        _render_pil_versus_2col_card(c2, "~110k", "Baseus i-wok2", "~420k", "Thân hợp kim nhôm bền bỉ")
-        _render_pil_buy_skip_card(c3, "~1.850k", "Ngồi máy tính 8 tiếng cần đỡ mỏi cổ tay", "Bàn tay quá cỡ lớn hơn trung bình")
+        cov_clean = Path(card_td) / "cover_cleaning.jpg"
+        cov_mini = Path(card_td) / "cover_mini.jpg"
+        _render_pil_score_verdict_card(c1, 8.8, "Deerma CM800", "Lực hút 13kPa kèm tia UV diệt mạt bụi thật", "~690k")
+        _render_pil_versus_2col_card(c2, "~160k", "Deerma CM800", "~690k", "Đập rung mạnh, lọc HEPA kín")
+        _render_pil_buy_skip_card(c3, "~690k", "Nhà có trẻ nhỏ hoặc nuôi thú cưng trên nệm", "Ngại dây điện cắm trực tiếp 4 mét")
+        sample_photo = Image.new("RGB", (800, 800), (240, 245, 245))
+        render_uniform_sku_cover_jpeg(cov_clean, [sample_photo], "DEERMA CM800", "~690K", "HÚT SẠCH MẠT BỤI NỆM?", domain="CLEANING_CARE")
+        render_uniform_sku_cover_jpeg(cov_mini, [sample_photo], "PHILIPS STH3020", "~950K", "ỦI PHẲNG ÁO TRONG 30S?", domain="MINI_APPLIANCE")
         assert c1.exists() and c1.stat().st_size > 8000
         assert c2.exists() and c2.stat().st_size > 8000
         assert c3.exists() and c3.stat().st_size > 8000
+        assert cov_clean.exists() and cov_clean.stat().st_size > 40_000
+        assert cov_mini.exists() and cov_mini.stat().st_size > 40_000
     print(
         "  [PASS] Upgrade-1 (6 Format kể chuyện khớp ngữ cảnh + 3 Thẻ Visual M4 Chấm điểm / Đối đầu / Nên mua-Cân nhắc): OK.",
         flush=True,

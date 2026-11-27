@@ -240,7 +240,7 @@ class VideoRegistryManager:
             else:
                 existing.setdefault("script_id", script_id)
                 existing.setdefault("script_format", "SINGLE_SKU_DEEP_DIVE")
-                existing.setdefault("domain", "TECH_DESK")
+                existing.setdefault("domain", "CLEANING_CARE")
                 existing.setdefault("category_id", "general")
                 existing.setdefault("narrative_angle", "PAIN_POINT_REALITY_CHECK")
                 existing.setdefault("title_vi", script_id)

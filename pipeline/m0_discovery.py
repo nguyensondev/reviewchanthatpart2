@@ -3,8 +3,8 @@ Module M0: Autonomous Multi-Brand SKU Discovery (`pipeline/m0_discovery.py`).
 
 Responsibilities (Black-Box Contract):
   1. Knows ONLY the 2 root domains:
-     - `TECH_DESK`    : Đồ công nghệ & Góc làm việc
-     - `KITCHEN_TECH` : Đồ dùng & Công nghệ nhà bếp
+     - `CLEANING_CARE`  : Đồ vệ sinh & Chăm sóc nhà cửa thông minh
+     - `MINI_APPLIANCE` : Gia dụng mini tiện ích phòng ở & Sinh hoạt
   2. Reads `data/m0_history.json` to avoid repeating recently explored sub-niches.
   3. Step M0.1 (LLM Planner): Autonomously selects a high-demand problem/sub-niche and generates
      BRAND-AGNOSTIC functional search queries.
@@ -59,337 +59,20 @@ HISTORY_PATH = DATA_DIR / "m0_history.json"
 OUTPUT_POOL_PATH = DATA_DIR / "m0_candidate_pool.json"
 
 ROOT_DOMAINS: Dict[DomainId, str] = {
-    "KITCHEN_TECH": "Đồ dùng & Công nghệ nhà bếp thông minh (Sơ chế, nấu nướng, bảo quản, tối ưu căn bếp)",
-    "TECH_DESK": "Đồ công nghệ & Phụ kiện góc làm việc (Desk setup, cáp sạc, giá đỡ, chuột phím, phụ kiện năng suất)",
+    "CLEANING_CARE": "Đồ vệ sinh & Chăm sóc nhà cửa thông minh (Hút bụi, lau sàn, cọ rửa nhà tắm, khử khuẩn giường nệm, chăm sóc bề mặt & vải vóc)",
+    "MINI_APPLIANCE": "Gia dụng mini tiện ích phòng ở & Sinh hoạt (Hút ẩm, lọc không khí, bàn ủi hơi nước, sấy khô khử khuẩn, quạt tích điện, bắt muỗi)",
 }
 
-# Curated 18-category rotation taxonomy (9 TECH_DESK + 9 KITCHEN_TECH) with semantic synonym tokens
+# Curated 24-category rotation taxonomy (12 CLEANING_CARE + 12 MINI_APPLIANCE) with semantic synonym tokens
 # so M0 can deterministically detect and block category repetition across runs and 3-7 day cooldowns.
 CATEGORY_ROTATION_TAXONOMY: List[Dict[str, Any]] = [
-    # --- TECH_DESK (Ergonomic & Productivity) ---
-    {
-        "category_id": "screen_hanging_light_bar",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Đèn treo màn hình máy tính chống chói bảo vệ mắt",
-        "problem_solved_vi": "Chống lóa màn hình và giảm mỏi mắt khi làm việc ban đêm mà không tốn diện tích mặt bàn",
-        "synonyms_norm": ["screen_hanging_light", "monitor_light_bar", "den_treo_man_hinh", "den_man_hinh", "iwok"],
-        "generic_web_queries_vi": [
-            "đèn treo màn hình máy tính chống chói loại nào tốt",
-            "so sánh đèn kẹp màn hình bảo vệ mắt",
-        ],
-        "generic_youtube_queries_vi": [
-            "review đèn treo màn hình chống chói",
-            "đánh giá đèn treo màn hình máy tính",
-        ],
-    },
-    {
-        "category_id": "ergonomic_vertical_mouse",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Chuột công thái học dọc chống mỏi cổ tay",
-        "problem_solved_vi": "Giảm áp lực ống cổ tay và chống tê mỏi khi dùng máy tính liên tục 8 tiếng mỗi ngày",
-        "synonyms_norm": ["vertical_mouse", "ergonomic_mouse", "chuot_cong_thai_hoc", "chuot_doc"],
-        "generic_web_queries_vi": [
-            "chuột công thái học dọc không dây loại nào tốt",
-            "kinh nghiệm chọn chuột dọc chống mỏi cổ tay",
-        ],
-        "generic_youtube_queries_vi": [
-            "review chuột công thái học dọc",
-            "so sánh chuột dọc chống mỏi tay",
-        ],
-    },
-    {
-        "category_id": "aluminum_laptop_stand_foldable",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Giá đỡ laptop hợp kim nhôm tản nhiệt gấp gọn",
-        "problem_solved_vi": "Nâng màn hình laptop ngang tầm mắt chống gù cổ và tăng lưu thông khí tản nhiệt",
-        "synonyms_norm": ["laptop_stand", "gia_do_laptop", "ke_laptop_nhom", "de_tan_nhiet_laptop"],
-        "generic_web_queries_vi": [
-            "giá đỡ laptop hợp kim nhôm gấp gọn loại nào chắc chắn",
-            "so sánh kệ đỡ laptop tản nhiệt chống mỏi cổ",
-        ],
-        "generic_youtube_queries_vi": [
-            "review giá đỡ laptop nhôm gấp gọn",
-            "đánh giá kệ nâng laptop tản nhiệt",
-        ],
-    },
-    {
-        "category_id": "gan_desktop_fast_charger_station",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Trạm sạc nhanh GaN đa cổng để bàn gọn dây",
-        "problem_solved_vi": "Thay thế 3-4 củ sạc rời rạc trên bàn làm việc bằng một trạm sạc GaN công suất cao an toàn",
-        "synonyms_norm": ["gan_charger", "desktop_charger", "tram_sac_gan", "cu_sac_nhanh_gan", "sac_da_cong"],
-        "generic_web_queries_vi": [
-            "trạm sạc nhanh GaN để bàn nhiều cổng loại nào tốt",
-            "so sánh củ sạc nhanh GaN 65W 100W đa cổng",
-        ],
-        "generic_youtube_queries_vi": [
-            "review trạm sạc GaN để bàn",
-            "đánh giá sạc nhanh GaN đa cổng",
-        ],
-    },
-    {
-        "category_id": "usb_c_multiport_docking_hub",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Hub chuyển đổi USB-C đa năng xuất hình 4K HDMI",
-        "problem_solved_vi": "Mở rộng cổng kết nối HDMI 4K, USB 3.0, thẻ nhớ và sạc PD cho laptop mỏng nhẹ mà không bị nóng",
-        "synonyms_norm": ["usb_c_hub", "type_c_hub", "bo_chuyen_doi_usb_c", "docking_station"],
-        "generic_web_queries_vi": [
-            "hub chuyển đổi USB-C ra HDMI 4K loại nào ổn định ít nóng",
-            "so sánh bộ chia cổng Type-C đa năng cho laptop",
-        ],
-        "generic_youtube_queries_vi": [
-            "review hub USB-C đa năng",
-            "đánh giá bộ chuyển đổi Type-C HDMI",
-        ],
-    },
-    {
-        "category_id": "low_profile_wireless_mechanical_keyboard",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Bàn phím cơ không dây Low-Profile gõ êm văn phòng",
-        "problem_solved_vi": "Mang lại cảm giác gõ phím cơ chính xác nhưng mỏng nhẹ, không cần kê tay và không gây ồn nơi công sở",
-        "synonyms_norm": ["low_profile_keyboard", "mechanical_keyboard", "ban_phim_co_low_profile", "ban_phim_co_khong_day"],
-        "generic_web_queries_vi": [
-            "bàn phím cơ không dây low profile gõ êm cho văn phòng",
-            "so sánh bàn phím cơ mỏng nhẹ kết nối đa thiết bị",
-        ],
-        "generic_youtube_queries_vi": [
-            "review bàn phím cơ low profile",
-            "đánh giá bàn phím cơ không dây văn phòng",
-        ],
-    },
-    {
-        "category_id": "gas_spring_monitor_arm",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Tay nâng màn hình máy tính trợ lực lò xo khí nén",
-        "problem_solved_vi": "Giải phóng toàn bộ diện tích chân đế màn hình và xoay chỉnh độ cao góc nhìn linh hoạt",
-        "synonyms_norm": ["monitor_arm", "tay_nang_man_hinh", "gia_treo_man_hinh", "arm_man_hinh"],
-        "generic_web_queries_vi": [
-            "arm màn hình trợ lực khí nén loại nào chịu tải tốt",
-            "kinh nghiệm chọn giá treo màn hình máy tính kẹp bàn",
-        ],
-        "generic_youtube_queries_vi": [
-            "review arm màn hình máy tính",
-            "so sánh tay nâng màn hình kẹp bàn",
-        ],
-    },
-    {
-        "category_id": "magnetic_retractable_fast_charging_cable",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Cáp sạc nhanh tự cuộn gọn từ tính chống rối",
-        "problem_solved_vi": "Xóa sổ cảnh dây cáp sạc rối tung trên mặt bàn và dễ đứt ngầm ở cổ cáp",
-        "synonyms_norm": ["magnetic_cable", "retractable_cable", "cap_sac_tu_cuon", "cap_sac_tu_tinh"],
-        "generic_web_queries_vi": [
-            "cáp sạc nhanh Type-C tự cuộn từ tính loại nào bền",
-            "đánh giá dây sạc nhanh 100W chống rối",
-        ],
-        "generic_youtube_queries_vi": [
-            "review cáp sạc từ tính tự cuộn",
-            "đánh giá cáp sạc nhanh chống rối",
-        ],
-    },
-    {
-        "category_id": "cordless_compressed_air_desk_duster",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Máy thổi bụi vệ sinh bàn phím và góc máy tính cầm tay",
-        "problem_solved_vi": "Thổi sạch bụi kẹt sâu dưới khe bàn phím cơ và quạt tản nhiệt nhanh chóng không dùng bình khí nén",
-        "synonyms_norm": ["air_duster", "desk_vacuum", "may_thoi_bui_ban_phim", "may_hut_bui_ban_phim"],
-        "generic_web_queries_vi": [
-            "máy thổi bụi vệ sinh bàn phím cầm tay dùng pin loại nào mạnh",
-            "so sánh máy hút thổi bụi mini cho góc làm việc",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy thổi bụi bàn phím cầm tay",
-            "đánh giá máy vệ sinh bàn phím mini",
-        ],
-    },
-    # --- KITCHEN_TECH (Precision Prep & Smart Cooking) ---
-    {
-        "category_id": "digital_kitchen_food_scale",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Cân điện tử nhà bếp độ chính xác cao chống nước",
-        "problem_solved_vi": "Cân đo chính xác từng 0.1g nguyên liệu làm bánh, pha cà phê và kiểm soát calo bữa ăn",
-        "synonyms_norm": ["kitchen_scale", "food_scale", "can_dien_tu_nha_bep", "can_nha_bep", "can_lam_banh"],
-        "generic_web_queries_vi": [
-            "cân điện tử nhà bếp loại nào chính xác bền chống nước",
-            "kinh nghiệm mua cân tiểu ly nhà bếp làm bánh",
-        ],
-        "generic_youtube_queries_vi": [
-            "review cân điện tử nhà bếp",
-            "so sánh cân điện tử làm bánh chính xác",
-        ],
-    },
-    {
-        "category_id": "instant_read_digital_food_thermometer",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Nhiệt kế nấu ăn điện tử đầu dò inox đo nhanh",
-        "problem_solved_vi": "Kiểm soát chuẩn xác nhiệt độ lòng thịt nướng, dầu chiên và sữa pha mà không cần cắt thử",
-        "synonyms_norm": ["food_thermometer", "meat_thermometer", "nhiet_ke_nau_an", "nhiet_ke_thuc_pham"],
-        "generic_web_queries_vi": [
-            "nhiệt kế nấu ăn điện tử đo nhiệt độ thịt dầu chiên loại nào tốt",
-            "so sánh nhiệt kế thực phẩm đầu dò inox chống nước",
-        ],
-        "generic_youtube_queries_vi": [
-            "review nhiệt kế nấu ăn điện tử",
-            "đánh giá nhiệt kế đo thực phẩm nhà bếp",
-        ],
-    },
-    {
-        "category_id": "compact_vacuum_food_sealer",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Máy hút chân không thực phẩm mini gia đình",
-        "problem_solved_vi": "Bảo quản thịt cá và đồ khô trong tủ lạnh lâu gấp 3-5 lần mà không bị lẫn mùi hay cháy lạnh",
-        "synonyms_norm": ["vacuum_sealer", "may_hut_chan_khong", "hut_chan_khong_thuc_pham"],
-        "generic_web_queries_vi": [
-            "máy hút chân không thực phẩm gia đình loại nào hút khỏe không kén túi",
-            "kinh nghiệm mua máy hàn miệng túi hút chân không nhà bếp",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy hút chân không thực phẩm gia đình",
-            "so sánh máy hút chân không mini nhà bếp",
-        ],
-    },
-    {
-        "category_id": "glass_mist_oil_sprayer_bottle",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Bình xịt dầu ăn phun sương thủy tinh dùng cho nồi chiên không dầu",
-        "problem_solved_vi": "Phủ đều lớp dầu mỏng lên thực phẩm trong nồi chiên không dầu giúp giòn đều và giảm 70% lượng dầu mỡ",
-        "synonyms_norm": ["oil_sprayer", "binh_xit_dau_an", "chai_xit_dau_phun_suong"],
-        "generic_web_queries_vi": [
-            "bình xịt dầu ăn phun sương thủy tinh loại nào không bị tắc tia",
-            "review bình xịt dầu cho nồi chiên không dầu",
-        ],
-        "generic_youtube_queries_vi": [
-            "review bình xịt dầu ăn phun sương",
-            "đánh giá chai xịt dầu nồi chiên không dầu",
-        ],
-    },
-    {
-        "category_id": "handheld_rechargeable_milk_frother",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Máy đánh bọt cà phê và tạo bọt sữa cầm tay sạc pin",
-        "problem_solved_vi": "Đánh bông bọt sữa cafe, matcha và trứng trong 20 giây ngay tại nhà với que inox 304 dễ rửa",
-        "synonyms_norm": ["milk_frother", "coffee_frother", "may_danh_bot_ca_phe", "may_tao_bot_sua"],
-        "generic_web_queries_vi": [
-            "máy đánh bọt cà phê cầm tay sạc pin loại nào khỏe bền",
-            "so sánh cây tạo bọt sữa inox 304 tại nhà",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy đánh bọt cà phê cầm tay",
-            "đánh giá máy tạo bọt sữa sạc pin",
-        ],
-    },
-    {
-        "category_id": "temperature_control_gooseneck_kettle",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Ấm đun nước siêu tốc chỉnh nhiệt độ giữ ấm pha trà cà phê",
-        "problem_solved_vi": "Đun nước đúng chuẩn nhiệt độ (60-100 độ C) cho từng loại trà, cà phê và giữ ấm tự động",
-        "synonyms_norm": ["temperature_kettle", "gooseneck_kettle", "am_sieu_toc_chinh_nhiet", "am_dun_nuoc_giu_nhiet"],
-        "generic_web_queries_vi": [
-            "ấm siêu tốc chỉnh nhiệt độ giữ ấm inox 304 loại nào tốt",
-            "so sánh ấm đun nước pha trà cà phê có màn hình nhiệt độ",
-        ],
-        "generic_youtube_queries_vi": [
-            "review ấm siêu tốc chỉnh nhiệt độ",
-            "đánh giá ấm đun nước giữ nhiệt thông minh",
-        ],
-    },
-    {
-        "category_id": "electric_ceramic_burr_coffee_grinder",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Máy xay cà phê hạt mini dùng pin cối gốm/thép",
-        "problem_solved_vi": "Xay hạt cà phê tươi đồng đều nhiều cỡ mịn ngay trước khi pha mà không làm nóng mất hương",
-        "synonyms_norm": ["coffee_grinder", "may_xay_ca_phe", "coi_xay_ca_phe"],
-        "generic_web_queries_vi": [
-            "máy xay cà phê hạt mini tích điện loại nào xay đều bền",
-            "so sánh cối xay cà phê cầm tay chỉnh cỡ mịn",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy xay cà phê mini cầm tay",
-            "đánh giá cối xay cà phê hạt dùng pin",
-        ],
-    },
-    {
-        "category_id": "magnetic_rotary_kitchen_timer",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Đồng hồ bấm giờ nấu ăn xoay cơ học/LED hít nam châm tủ lạnh",
-        "problem_solved_vi": "Canh chuẩn từng giây thời gian ủ bột, luộc trứng, hầm thức ăn chỉ bằng thao tác xoay vòng nhanh",
-        "synonyms_norm": ["kitchen_timer", "rotary_timer", "dong_ho_bam_gio_nau_an", "hen_gio_nha_bep"],
-        "generic_web_queries_vi": [
-            "đồng hồ bấm giờ nấu ăn hít nam châm loại nào bền dễ xoay",
-            "so sánh đồng hồ hẹn giờ nhà bếp màn hình LED",
-        ],
-        "generic_youtube_queries_vi": [
-            "review đồng hồ bấm giờ nấu ăn nam châm",
-            "đánh giá timer hẹn giờ nhà bếp",
-        ],
-    },
-    {
-        "category_id": "automatic_touchless_dish_soap_dispenser",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Máy tạo bọt xà phòng/nước rửa chén cảm ứng tự động chống nước",
-        "problem_solved_vi": "Lấy bọt nước rửa chén/rửa tay tự động không cần chạm tay đang dính dầu mỡ vào chai",
-        "synonyms_norm": ["soap_dispenser", "may_tao_bot_xa_phong", "binh_xit_nuoc_rua_chen_tu_dong"],
-        "generic_web_queries_vi": [
-            "máy tạo bọt nước rửa chén cảm ứng tự động chống nước loại nào bền",
-            "so sánh bình lấy xà phòng cảm ứng nhà bếp",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy tạo bọt xà phòng cảm ứng",
-            "đánh giá máy xịt nước rửa chén tự động",
-        ],
-    },
-    # --- HIGH-VELOCITY SEASONAL / WEATHER CONCEPTS (Synced with M_TREND) ---
-    {
-        "category_id": "mini_clothes_dryer_dehumidifier",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Máy hút ẩm & máy sấy quần áo mini chống nồm mốc",
-        "problem_solved_vi": "Hút ẩm phòng ngủ, tủ quần áo và sấy khô đồ nhanh chóng trong những ngày mưa nồm ẩm kéo dài",
-        "synonyms_norm": ["dehumidifier", "may_hut_am", "may_say_quan_ao_mini", "chong_nom_am"],
-        "generic_web_queries_vi": [
-            "máy hút ẩm mini cho phòng ngủ chống nồm ẩm loại nào tốt",
-            "so sánh máy sấy quần áo mini gia đình tiết kiệm điện",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy hút ẩm mini phòng ngủ",
-            "đánh giá máy sấy quần áo mini chống nồm",
-        ],
-    },
-    {
-        "category_id": "cordless_rechargeable_fan_powerbank",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Quạt tích điện mini kiêm sạc dự phòng khi mất điện nắng nóng",
-        "problem_solved_vi": "Làm mát linh hoạt trên bàn làm việc và dự phòng thiết yếu khi mất điện mùa nắng nóng",
-        "synonyms_norm": ["rechargeable_fan", "quat_tich_dien", "quat_mini_de_ban", "quat_cam_tay"],
-        "generic_web_queries_vi": [
-            "quạt tích điện mini để bàn pin trâu chạy êm loại nào tốt",
-            "so sánh quạt cầm tay mini tốc độ cao pin lâu",
-        ],
-        "generic_youtube_queries_vi": [
-            "review quạt tích điện mini để bàn",
-            "đánh giá quạt mini cầm tay pin trâu",
-        ],
-    },
-    {
-        "category_id": "hepa_air_purifier_mini",
-        "domain": "TECH_DESK",
-        "category_name_vi": "Máy lọc không khí mini để bàn màng lọc HEPA khử bụi mịn",
-        "problem_solved_vi": "Lọc bụi mịn PM2.5, phấn hoa và mùi hôi trực tiếp tại bàn làm việc và phòng ngủ nhỏ",
-        "synonyms_norm": ["air_purifier", "may_loc_khong_khi_mini", "loc_bui_min_hepa"],
-        "generic_web_queries_vi": [
-            "máy lọc không khí mini để bàn màng lọc HEPA loại nào tốt",
-            "so sánh máy lọc không khí phòng ngủ nhỏ khử bụi mịn",
-        ],
-        "generic_youtube_queries_vi": [
-            "review máy lọc không khí mini để bàn",
-            "đánh giá máy lọc không khí phòng ngủ nhỏ",
-        ],
-    },
+    # --- CLEANING_CARE (Smart Home Cleaning, Floor, Bathroom & Fabric Hygiene) ---
     {
         "category_id": "mini_cordless_handheld_vacuum",
-        "domain": "KITCHEN_TECH",
-        "category_name_vi": "Máy hút bụi cầm tay không dây mini cho sofa, giường & ô tô",
-        "problem_solved_vi": "Hút sạch vụn thức ăn, tóc rụng, lông thú cưng trên sofa, nệm và nội thất ô tô gọn nhẹ",
-        "synonyms_norm": ["handheld_vacuum", "may_hut_bui_cam_tay_mini", "may_hut_bui_o_to"],
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy hút bụi cầm tay không dây mini cho sofa, khe cửa & ô tô",
+        "problem_solved_vi": "Hút sạch vụn thức ăn, tóc rụng, lông thú cưng trên sofa, khe cửa sổ và nội thất ô tô gọn nhẹ không vướng dây điện",
+        "synonyms_norm": ["handheld_vacuum", "may_hut_bui_cam_tay_mini", "may_hut_bui_o_to", "hut_bui_sofa"],
         "generic_web_queries_vi": [
             "máy hút bụi cầm tay không dây mini lực hút mạnh loại nào tốt",
             "so sánh máy hút bụi mini cho sofa giường và ô tô",
@@ -397,6 +80,352 @@ CATEGORY_ROTATION_TAXONOMY: List[Dict[str, Any]] = [
         "generic_youtube_queries_vi": [
             "review máy hút bụi cầm tay không dây mini",
             "đánh giá máy hút bụi mini lực hút mạnh",
+        ],
+    },
+    {
+        "category_id": "uv_mattress_dust_mite_vacuum",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy hút bụi giường nệm diệt khuẩn tia UV đập rung tần số cao",
+        "problem_solved_vi": "Đập rung tách mạt bụi, tế bào chết, lông thú cưng ẩn sâu trong nệm và chăn gối giúp giảm ngứa da, viêm mũi dị ứng",
+        "synonyms_norm": ["mattress_vacuum", "dust_mite_vacuum", "may_hut_bui_giuong_nem", "hut_mat_bui_uv"],
+        "generic_web_queries_vi": [
+            "máy hút bụi giường nệm diệt khuẩn tia UV loại nào lực hút khỏe",
+            "kinh nghiệm mua máy hút mạt bụi chăn ga gối nệm gia đình",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy hút bụi giường nệm tia UV",
+            "so sánh máy hút bụi chăn nệm diệt khuẩn",
+        ],
+    },
+    {
+        "category_id": "cordless_electric_spin_scrubber",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Chổi cọ nhà tắm và sàn gạch xoay điện không dây chống nước",
+        "problem_solved_vi": "Cọ sạch cặn canxi vách kính, ron gạch ố vàng và bồn rửa nhà tắm nhanh gọn mà không phải cúi gập lưng chà tay mỏi nhừ",
+        "synonyms_norm": ["spin_scrubber", "electric_scrubber", "choi_co_nha_tam_dien", "may_co_rua_nha_vesinh"],
+        "generic_web_queries_vi": [
+            "chổi cọ nhà tắm điện không dây chống nước loại nào khỏe không đứng máy",
+            "so sánh máy cọ rửa nhà vệ sinh đa năng cán dài",
+        ],
+        "generic_youtube_queries_vi": [
+            "review chổi cọ nhà tắm điện không dây",
+            "đánh giá máy cọ rửa nhà vệ sinh cầm tay",
+        ],
+    },
+    {
+        "category_id": "spray_flat_mop_microfiber",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Cây lau nhà phun sương bàn phẳng xoay 360 độ gọn nhẹ",
+        "problem_solved_vi": "Xịt sương ẩm vừa đủ giúp sàn gỗ và gạch men khô ngay trong vài chục giây mà không phải xách xô nước nặng nề",
+        "synonyms_norm": ["spray_mop", "cay_lau_nha_phun_suong", "choi_lau_nha_xit_nuoc"],
+        "generic_web_queries_vi": [
+            "cây lau nhà phun sương loại nào bền không tắc vòi xịt",
+            "so sánh cây lau nhà xịt nước thông minh cho sàn gỗ chung cư",
+        ],
+        "generic_youtube_queries_vi": [
+            "review cây lau nhà phun sương",
+            "đánh giá chổi lau nhà phun sương thông minh",
+        ],
+    },
+    {
+        "category_id": "spin_mop_dual_bucket_self_wash",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Bộ cây lau nhà tự vắt thông minh tách nước bẩn và nước sạch",
+        "problem_solved_vi": "Giặt sạch bông lau bằng nguồn nước sạch riêng biệt và vắt khô ráo hoàn toàn không cần chạm tay vào nước bẩn",
+        "synonyms_norm": ["dual_bucket_mop", "self_wash_mop", "cay_lau_nha_tu_vat", "lau_nha_tach_nuoc_ban"],
+        "generic_web_queries_vi": [
+            "bộ cây lau nhà tự vắt tách nước bẩn loại nào bền sạch tóc",
+            "kinh nghiệm chọn thùng lau nhà thông minh tách nước hai ngăn",
+        ],
+        "generic_youtube_queries_vi": [
+            "review cây lau nhà tách nước bẩn",
+            "so sánh bộ lau nhà tự vắt thông minh",
+        ],
+    },
+    {
+        "category_id": "spot_carpet_upholstery_cleaner",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy giặt thảm, ghế sofa vải và nệm cầm tay phun hút làm sạch sâu",
+        "problem_solved_vi": "Phun dung dịch và hút ngược vết cà phê, sữa đổ, vết bẩn thú cưng bám sâu trong sofa nỉ và thảm trải sàn mà không cần tháo vỏ",
+        "synonyms_norm": ["spot_cleaner", "carpet_cleaner", "may_giat_tham_sofa", "may_giat_nem_cam_tay"],
+        "generic_web_queries_vi": [
+            "máy giặt thảm sofa cầm tay gia đình loại nào hút khỏe nhanh khô",
+            "so sánh máy phun hút giặt ghế sofa nệm tại nhà",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy giặt sofa thảm cầm tay",
+            "đánh giá máy phun hút giặt thảm gia đình",
+        ],
+    },
+    {
+        "category_id": "smart_touchless_trash_can",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Thùng rác thông minh cảm ứng tự mở nắp khử mùi chống nước",
+        "problem_solved_vi": "Mở nắp tự động trong 0.3 giây không cần chạm tay và đậy kín ngăn mùi hôi ẩm, côn trùng trong nhà tắm và phòng bếp",
+        "synonyms_norm": ["smart_trash_can", "sensor_trash_bin", "thung_rac_thong_minh", "thung_rac_cam_ung"],
+        "generic_web_queries_vi": [
+            "thùng rác thông minh cảm ứng chống nước nhà tắm loại nào bền",
+            "so sánh thùng rác tự động đóng túi cảm biến hồng ngoại",
+        ],
+        "generic_youtube_queries_vi": [
+            "review thùng rác thông minh cảm ứng",
+            "đánh giá thùng rác tự động chống nước",
+        ],
+    },
+    {
+        "category_id": "automatic_touchless_foam_soap_dispenser",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy tạo bọt xà phòng rửa tay và nước rửa chén cảm ứng tự động",
+        "problem_solved_vi": "Tạo bọt mịn tức thì khi đưa tay vào cảm biến giúp rửa sạch nhanh, tiết kiệm dung dịch và giữ chai lọ luôn khô sạch",
+        "synonyms_norm": ["soap_dispenser", "foam_dispenser", "may_tao_bot_xa_phong", "binh_xit_xa_phong_cam_ung"],
+        "generic_web_queries_vi": [
+            "máy tạo bọt xà phòng rửa tay cảm ứng chống nước IPX5 loại nào bền",
+            "so sánh bình lấy nước rửa chén tạo bọt tự động sạc pin",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy tạo bọt xà phòng cảm ứng",
+            "đánh giá máy rửa tay tạo bọt tự động",
+        ],
+    },
+    {
+        "category_id": "rechargeable_fabric_lint_remover",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy cắt lông xù quần áo và áo len sạc pin lưỡi thép an toàn",
+        "problem_solved_vi": "Cắt sạch hạt xù lông trên áo khoác, đồ len, quần nỉ và vỏ ghế sofa trong vài phút mà không làm rách sợi vải",
+        "synonyms_norm": ["lint_remover", "fabric_shaver", "may_cat_long_xu", "may_cao_long_xu_quan_ao"],
+        "generic_web_queries_vi": [
+            "máy cắt lông xù quần áo sạc pin loại nào sắc bền không rách vải",
+            "so sánh máy tỉa lông xù áo len có khoang hút bụi vải",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy cắt lông xù quần áo",
+            "đánh giá máy cắt lông xù sạc pin",
+        ],
+    },
+    {
+        "category_id": "ultrasonic_jewelry_glasses_cleaner",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy rửa kính mắt, trang sức và dây đồng hồ bằng sóng siêu âm 45kHz",
+        "problem_solved_vi": "Đánh bật dầu nhờn, bụi bẩn kẹt sâu trong khe bản lề gọng kính mắt, nhẫn và dây đồng hồ kim loại chỉ với nước sạch",
+        "synonyms_norm": ["ultrasonic_cleaner", "may_rua_kinh_sieu_am", "be_rua_sieu_am_mini"],
+        "generic_web_queries_vi": [
+            "máy rửa kính mắt trang sức sóng siêu âm mini loại nào làm sạch thật",
+            "so sánh bể rửa siêu âm 45kHz vệ sinh kính và đồng hồ tại nhà",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy rửa kính mắt sóng siêu âm",
+            "đánh giá máy làm sạch siêu âm mini",
+        ],
+    },
+    {
+        "category_id": "cordless_window_glass_vacuum_wiper",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy lau kính hút nước bẩn cầm tay chống đọng vệt cho cửa sổ & vách tắm",
+        "problem_solved_vi": "Gạt phẳng và hút sạch nước bẩn trên vách kính phòng tắm, gương soi và cửa kính chung cư không nhỏ giọt xuống sàn",
+        "synonyms_norm": ["window_vacuum", "glass_wiper", "may_lau_kinh_cam_tay", "cay_gat_kinh_hut_nuoc"],
+        "generic_web_queries_vi": [
+            "máy lau kính hút nước bẩn cầm tay dùng pin loại nào sạch không vệt",
+            "kinh nghiệm mua máy vệ sinh vách kính nhà tắm chống ố canxi",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy lau kính cầm tay hút nước",
+            "đánh giá máy vệ sinh kính không dây",
+        ],
+    },
+    {
+        "category_id": "cordless_turbo_jet_air_duster",
+        "domain": "CLEANING_CARE",
+        "category_name_vi": "Máy thổi bụi phản lực cầm tay vệ sinh khe cửa sổ, lồng quạt & góc hẹp",
+        "problem_solved_vi": "Thổi bay bụi đóng mảng trong rãnh trượt cửa lùa, lưới lọc điều hòa, lồng quạt và góc tủ mà chổi thường không luồn tới",
+        "synonyms_norm": ["air_duster", "jet_fan_duster", "may_thoi_bui_cam_tay", "quat_phan_luc_thoi_bui"],
+        "generic_web_queries_vi": [
+            "máy thổi bụi phản lực cầm tay dùng pin không chổi than loại nào mạnh",
+            "so sánh máy hút thổi bụi mini vệ sinh khe cửa và quạt điều hòa",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy thổi bụi phản lực cầm tay",
+            "đánh giá quạt phản lực mini vệ sinh bụi",
+        ],
+    },
+    # --- MINI_APPLIANCE (Compact Home Comfort, Garment, Air & Daily Living Appliances) ---
+    {
+        "category_id": "handheld_foldable_garment_steamer",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Bàn ủi hơi nước cầm tay gấp gọn làm nóng nhanh không cần cầu là",
+        "problem_solved_vi": "Ủi phẳng áo sơ mi, váy voan ngay trên móc treo trong 30 giây buổi sáng vội đi làm hoặc mang gọn trong vali công tác",
+        "synonyms_norm": ["garment_steamer", "handheld_steamer", "ban_ui_hoi_nuoc_cam_tay", "ban_la_hoi_nuoc_gap_gon"],
+        "generic_web_queries_vi": [
+            "bàn ủi hơi nước cầm tay gấp gọn loại nào hơi mạnh không rỉ nước",
+            "so sánh bàn là hơi nước cầm tay công suất lớn đi làm du lịch",
+        ],
+        "generic_youtube_queries_vi": [
+            "review bàn ủi hơi nước cầm tay gấp gọn",
+            "so sánh bàn là hơi nước cầm tay loại nào tốt",
+        ],
+    },
+    {
+        "category_id": "mini_room_closet_dehumidifier",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy hút ẩm mini phòng ngủ và tủ quần áo chống nồm ẩm nấm mốc",
+        "problem_solved_vi": "Giữ phòng ngủ nhỏ, phòng thay đồ và tủ máy ảnh khô thoáng, ngăn mùi ẩm mốc khó chịu trong mùa mưa nồm kéo dài",
+        "synonyms_norm": ["mini_dehumidifier", "dehumidifier", "may_hut_am_mini", "hut_am_phong_ngu", "chong_nom_am"],
+        "generic_web_queries_vi": [
+            "máy hút ẩm mini cho phòng ngủ nhỏ chống nồm ẩm loại nào chạy êm",
+            "so sánh máy hút ẩm mini tủ quần áo tiết kiệm điện",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy hút ẩm mini phòng ngủ",
+            "đánh giá máy hút ẩm mini chống nồm",
+        ],
+    },
+    {
+        "category_id": "hepa_desktop_bedroom_air_purifier",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy lọc không khí mini phòng ngủ màng lọc HEPA H13 khử mùi & bụi mịn",
+        "problem_solved_vi": "Lọc sạch bụi mịn PM2.5, lông mèo bay lơ lửng và mùi thức ăn bí bách trong phòng ngủ nhỏ dưới 20m2 với độ ồn êm ban đêm",
+        "synonyms_norm": ["air_purifier", "hepa_purifier", "may_loc_khong_khi_mini", "loc_khong_khi_phong_ngu"],
+        "generic_web_queries_vi": [
+            "máy lọc không khí mini phòng ngủ màng lọc HEPA H13 loại nào êm bền",
+            "so sánh máy lọc không khí nhỏ gọn khử mùi thú cưng và bụi mịn",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy lọc không khí mini phòng ngủ",
+            "đánh giá máy lọc không khí HEPA nhỏ gọn",
+        ],
+    },
+    {
+        "category_id": "electric_shoe_dryer_deodorizer",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy sấy khô và khử mùi giày dép bằng nhiệt ấm & tia UV mùa mưa",
+        "problem_solved_vi": "Sấy khô đều từ mũi tới gót giày thể thao, giày da bị ướt mưa và khử mùi hôi ẩm qua đêm mà không làm bong keo giày",
+        "synonyms_norm": ["shoe_dryer", "may_say_giay", "say_kho_khu_mui_giay"],
+        "generic_web_queries_vi": [
+            "máy sấy giày khử mùi hẹn giờ tự ngắt loại nào bền an toàn",
+            "so sánh máy sấy khô giày dép mùa mưa không hỏng keo",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy sấy giày khử mùi",
+            "đánh giá máy sấy khô giày dép mùa mưa",
+        ],
+    },
+    {
+        "category_id": "portable_mini_clothes_dryer",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy sấy quần áo mini gấp gọn khử khuẩn cho căn hộ nhỏ & đồ em bé",
+        "problem_solved_vi": "Sấy khô nhanh mẻ quần áo mặc hàng ngày, đồ lót và khăn em bé trong ngày mưa dầm thiếu nắng mà không chiếm chỗ ban công",
+        "synonyms_norm": ["mini_clothes_dryer", "portable_dryer", "may_say_quan_ao_mini", "tu_say_quan_ao_gap_gon"],
+        "generic_web_queries_vi": [
+            "máy sấy quần áo mini gấp gọn cho phòng trọ chung cư loại nào tốt",
+            "so sánh tủ sấy quần áo mini khử khuẩn tiết kiệm điện",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy sấy quần áo mini gấp gọn",
+            "đánh giá máy sấy quần áo mini gia đình",
+        ],
+    },
+    {
+        "category_id": "quiet_air_circulator_desk_fan",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Quạt đối lưu tuần hoàn không khí / quạt tích điện mini chạy êm",
+        "problem_solved_vi": "Đẩy luồng khí mát điều hòa lan đều khắp phòng giúp tiết kiệm điện và dự phòng gió mát êm ái khi mất điện mùa hè",
+        "synonyms_norm": ["air_circulator", "rechargeable_fan", "quat_tuan_hoan_khong_khi", "quat_doi_luu", "quat_tich_dien_mini"],
+        "generic_web_queries_vi": [
+            "quạt tuần hoàn không khí để bàn chạy êm cho phòng điều hòa loại nào tốt",
+            "so sánh quạt tích điện mini đối lưu không khí pin lâu",
+        ],
+        "generic_youtube_queries_vi": [
+            "review quạt tuần hoàn không khí mini",
+            "đánh giá quạt đối lưu không khí phòng máy lạnh",
+        ],
+    },
+    {
+        "category_id": "ultrasonic_cool_mist_humidifier_diffuser",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy tạo độ ẩm & khuếch tán tinh dầu siêu âm chống khô họng phòng máy lạnh",
+        "problem_solved_vi": "Bù ẩm sương mịn tự động giúp hết khô mũi họng, nứt môi khi bật điều hòa cả đêm và thư giãn nhẹ nhàng trong phòng ngủ",
+        "synonyms_norm": ["humidifier", "aroma_diffuser", "may_tao_am_phong_ngu", "may_xong_tinh_dau_sieu_am"],
+        "generic_web_queries_vi": [
+            "máy tạo ẩm không khí phòng điều hòa siêu âm êm dễ vệ sinh loại nào tốt",
+            "so sánh máy phun sương tạo ẩm khử khuẩn cho phòng ngủ",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy tạo độ ẩm phòng điều hòa",
+            "đánh giá máy tạo ẩm phun sương phòng ngủ",
+        ],
+    },
+    {
+        "category_id": "uv_electric_mosquito_trap_swatter",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Đèn bắt muỗi tia UV & vợt muỗi điện thông minh tự bẫy muỗi ban đêm",
+        "problem_solved_vi": "Thu hút và tiêu diệt muỗi tự động ban đêm không khói hóa chất độc hại, bảo vệ giấc ngủ gia đình mùa mưa sốt xuất huyết",
+        "synonyms_norm": ["mosquito_trap", "electric_swatter", "den_bat_muoi", "vot_bat_muoi_thong_minh"],
+        "generic_web_queries_vi": [
+            "đèn bắt muỗi thông minh và vợt muỗi kiêm đèn bẫy UV loại nào hiệu quả thật",
+            "kinh nghiệm chọn máy bắt muỗi cho phòng ngủ an toàn không ồn",
+        ],
+        "generic_youtube_queries_vi": [
+            "review đèn bắt muỗi thông minh",
+            "đánh giá vợt muỗi điện kiêm đèn bắt muỗi",
+        ],
+    },
+    {
+        "category_id": "mini_portable_travel_electric_kettle",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Bình đun nước siêu tốc mini giữ nhiệt cá nhân ruột Inox 316 an toàn",
+        "problem_solved_vi": "Đun sôi nước pha trà, pha sữa và giữ ấm gọn như bình giữ nhiệt ngay tại bàn phòng ngủ hoặc mang đi du lịch tránh ấm khách sạn bẩn",
+        "synonyms_norm": ["portable_kettle", "travel_kettle", "binh_dun_nuoc_mini", "am_sieu_toc_du_lich"],
+        "generic_web_queries_vi": [
+            "bình đun nước siêu tốc mini giữ nhiệt inox 304 316 loại nào an toàn",
+            "so sánh cốc đun nước cầm tay du lịch chỉnh nhiệt độ",
+        ],
+        "generic_youtube_queries_vi": [
+            "review bình đun nước siêu tốc mini",
+            "đánh giá bình đun nước giữ nhiệt du lịch",
+        ],
+    },
+    {
+        "category_id": "high_speed_ionic_compact_hair_dryer",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy sấy tóc ion âm tốc độ cao nhỏ gọn nhanh khô không xơ rối",
+        "problem_solved_vi": "Làm khô tóc dày chỉ trong 3–5 phút bằng luồng gió mạnh kiểm soát nhiệt thông minh thay vì đốt nóng làm cháy xơ ngọn tóc",
+        "synonyms_norm": ["ionic_hair_dryer", "high_speed_hair_dryer", "may_say_toc_ion_am", "may_say_toc_toc_do_cao"],
+        "generic_web_queries_vi": [
+            "máy sấy tóc ion âm tốc độ cao không chổi than loại nào êm bền",
+            "so sánh máy sấy tóc nhỏ gọn kiểm soát nhiệt bảo vệ tóc",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy sấy tóc ion âm tốc độ cao",
+            "so sánh máy sấy tóc không chổi than nhỏ gọn",
+        ],
+    },
+    {
+        "category_id": "motion_sensor_rechargeable_closet_light",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Đèn LED cảm biến chuyển động sạc pin hít nam châm cho tủ áo & hành lang",
+        "problem_solved_vi": "Tự bật sáng dịu mắt ngay khi mở tủ quần áo, bước xuống giường ban đêm hoặc đi cầu thang mà không cần khoan đục đi dây điện",
+        "synonyms_norm": ["motion_sensor_light", "closet_light", "den_cam_bien_chuyen_dong", "den_led_dan_tu_quan_ao"],
+        "generic_web_queries_vi": [
+            "đèn LED thanh cảm biến chuyển động sạc pin dán tủ quần áo loại nào pin trâu",
+            "so sánh đèn ngủ cảm biến hồng ngoại hành lang cầu thang",
+        ],
+        "generic_youtube_queries_vi": [
+            "review đèn cảm biến chuyển động tủ quần áo",
+            "đánh giá đèn LED cảm ứng sạc pin nam châm",
+        ],
+    },
+    {
+        "category_id": "cordless_portable_oral_water_flosser",
+        "domain": "MINI_APPLIANCE",
+        "category_name_vi": "Máy tăm nước cầm tay chống nước IPX7 vệ sinh kẽ răng & niềng răng",
+        "problem_solved_vi": "Tia nước xung nhịp cuốn sạch mảng bám thức ăn sâu trong kẽ răng hàm và mắc cài niềng răng nơi bàn chải không chạm tới",
+        "synonyms_norm": ["water_flosser", "oral_irrigator", "may_tam_nuoc_cam_tay", "tam_nuoc_du_lich"],
+        "generic_web_queries_vi": [
+            "máy tăm nước cầm tay chống nước IPX7 tia êm không chảy máu nướu loại nào bền",
+            "kinh nghiệm chọn máy tăm nước cá nhân nhỏ gọn dễ vệ sinh bình nước",
+        ],
+        "generic_youtube_queries_vi": [
+            "review máy tăm nước cầm tay loại nào bền",
+            "so sánh máy tăm nước cá nhân chống nước IPX7",
         ],
     },
 ]
@@ -570,7 +599,8 @@ class AffiliateCSVRepository:
                         continue
                 confidence = "BRAND_AND_CATEGORY"
             elif brand.upper() == "OEM" and not re.search(
-                r"lock|inochi|elmich|bear|philips|ugreen|baseus|anker|hyperwork", title_norm
+                r"lock|inochi|elmich|bear|philips|deerma|xiaomi|dreame|roborock|tineco|dyson|karcher|levoit|panasonic|tefal|simplus|lumias",
+                title_norm,
             ):
                 confidence = "CATEGORY_FALLBACK"
             else:
@@ -731,10 +761,16 @@ class M0AutonomousDiscoveryEngine:
     """Executes the 4-stage autonomous discovery workflow (M0.1 -> M0.4)."""
 
     def __init__(self, llm_client: Optional[FreeTierGeminiClient] = None) -> None:
-        self.llm = llm_client or FreeTierGeminiClient()
+        self._llm: Optional[FreeTierGeminiClient] = llm_client
         self.csv_repo = AffiliateCSVRepository()
         self.brand_gate = OfficialBrandVideoGate()
         self.sku_registry = SKURegistryManager()
+
+    @property
+    def llm(self) -> FreeTierGeminiClient:
+        if self._llm is None:
+            self._llm = FreeTierGeminiClient()
+        return self._llm
 
     def _resolve_canonical_category_id(self, cat_id: str, cat_name_vi: str = "") -> str:
         """Map any category_id or Vietnamese name to its canonical taxonomy ID if it matches synonyms."""
@@ -756,7 +792,7 @@ class M0AutonomousDiscoveryEngine:
         Determine which categories are blocked (used in recent runs or on 3-7 day SKU cooldown)
         and return fresh unexplored categories from `CATEGORY_ROTATION_TAXONOMY`.
         """
-        blocked_ids: set[str] = {"pull_cord_garlic_chopper", "garlic_chopper"}
+        blocked_ids: set[str] = set()
         # Last 4 runs (~12 categories) + 3-7d SKU cooldown categories
         for r in (history.get("runs") or [])[-4:]:
             for cid in r.get("category_ids") or []:
@@ -766,38 +802,38 @@ class M0AutonomousDiscoveryEngine:
         for cid in reg_blocks.get("cooldown_categories", []):
             blocked_ids.add(self._resolve_canonical_category_id(str(cid)))
 
-        fresh_tech = [
+        fresh_cleaning = [
             item
             for item in CATEGORY_ROTATION_TAXONOMY
-            if item["domain"] == "TECH_DESK" and item["category_id"] not in blocked_ids
+            if item["domain"] == "CLEANING_CARE" and item["category_id"] not in blocked_ids
         ]
-        fresh_kitchen = [
+        fresh_appliance = [
             item
             for item in CATEGORY_ROTATION_TAXONOMY
-            if item["domain"] == "KITCHEN_TECH" and item["category_id"] not in blocked_ids
+            if item["domain"] == "MINI_APPLIANCE" and item["category_id"] not in blocked_ids
         ]
-        # If nearly all 18+ categories have been explored within 14d, fall back to oldest-used categories
+        # If nearly all 24 categories have been explored within 14d, fall back to oldest-used categories
         # so the pipeline rotates cleanly without ever deadlocking or repeating yesterday's category
         recent_cat_ts = self.sku_registry.get_recent_categories(within_days=14)
-        if not fresh_tech:
-            tech_all = [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "TECH_DESK"]
-            tech_all.sort(key=lambda it: recent_cat_ts.get(it["category_id"], ""))
-            fresh_tech = tech_all[: max(2, len(tech_all) // 2)]
-        if not fresh_kitchen:
-            kit_all = [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "KITCHEN_TECH"]
-            kit_all.sort(key=lambda it: recent_cat_ts.get(it["category_id"], ""))
-            fresh_kitchen = kit_all[: max(2, len(kit_all) // 2)]
+        if not fresh_cleaning:
+            clean_all = [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "CLEANING_CARE"]
+            clean_all.sort(key=lambda it: recent_cat_ts.get(it["category_id"], ""))
+            fresh_cleaning = clean_all[: max(2, len(clean_all) // 2)]
+        if not fresh_appliance:
+            app_all = [item for item in CATEGORY_ROTATION_TAXONOMY if item["domain"] == "MINI_APPLIANCE"]
+            app_all.sort(key=lambda it: recent_cat_ts.get(it["category_id"], ""))
+            fresh_appliance = app_all[: max(2, len(app_all) // 2)]
 
-        return blocked_ids, fresh_tech, fresh_kitchen
+        return blocked_ids, fresh_cleaning, fresh_appliance
 
     def _choose_next_domain(self, history: Dict[str, Any], override_domain: Optional[DomainId]) -> DomainId:
-        if override_domain in ("TECH_DESK", "KITCHEN_TECH"):
+        if override_domain in ("CLEANING_CARE", "MINI_APPLIANCE"):
             return override_domain
         runs = history.get("runs", [])
         if not runs:
-            return "KITCHEN_TECH"
+            return "CLEANING_CARE"
         last_domain = runs[-1].get("domain")
-        return "TECH_DESK" if last_domain == "KITCHEN_TECH" else "KITCHEN_TECH"
+        return "MINI_APPLIANCE" if last_domain == "CLEANING_CARE" else "CLEANING_CARE"
 
     def step_m0_1_plan_subniche(
         self,
@@ -807,12 +843,12 @@ class M0AutonomousDiscoveryEngine:
         max_categories: int = 3,
         ignore_trends: bool = False,
     ) -> LLMSubNichePlanResponse:
-        blocked_cat_ids, fresh_tech, fresh_kitchen = self._get_blocked_and_fresh_categories(history)
+        blocked_cat_ids, fresh_cleaning, fresh_appliance = self._get_blocked_and_fresh_categories(history)
         reg_blocks = self.sku_registry.get_blocked_categories_and_skus()
 
         recent_cats = [
             f"- {r.get('sub_niche_id')} ({r.get('sub_niche_name_vi')}): {r.get('category_ids')}"
-            for r in history.get("runs", [])[-15:]
+            for r in (history.get("runs") or [])[-15:]
         ]
         if blocked_cat_ids:
             recent_cats.append(f"- Đang khóa (vừa lên sóng hoặc trong kỳ nghỉ 3-7 ngày): {sorted(blocked_cat_ids)}")
@@ -825,12 +861,12 @@ class M0AutonomousDiscoveryEngine:
         recent_skus_str = (
             ", ".join(dict.fromkeys(recent_skus_list))
             if recent_skus_list
-            else "(Mặc định tránh các SKU đã làm như cối xay tỏi ớt kéo tay Lock&Lock CKS321 / CKS314)"
+            else "(Chưa có SKU nào bị khóa gần đây)"
         )
 
         suggested_fresh_lines = [
             f"  * [{item['domain']}] `{item['category_id']}` — {item['category_name_vi']} ({item['problem_solved_vi']})"
-            for item in (fresh_tech[:3] + fresh_kitchen[:3])
+            for item in (fresh_cleaning[:3] + fresh_appliance[:3])
         ]
         fresh_suggestions_str = "\n".join(suggested_fresh_lines)
 
@@ -878,24 +914,24 @@ class M0AutonomousDiscoveryEngine:
 
         domain_balance_rule = (
             f"Chủ đề ưu tiên cân bằng kỳ này: `{domain}`, NHƯNG VÌ `max_categories = {max_categories} >= 2`, BẮT BUỘC PHẢI PHÂN BỔ HÀI HÒA GIỮA CẢ HAI CHỦ ĐỀ GỐC:\n"
-            f"- `TECH_DESK`: {ROOT_DOMAINS['TECH_DESK']} (VD: giá đỡ laptop nhôm tản nhiệt, hub USB-C đa năng, đèn treo màn hình chống chói, sạc nhanh GaN để bàn, quạt mini để bàn êm).\n"
-            f"- `KITCHEN_TECH`: {ROOT_DOMAINS['KITCHEN_TECH']} (VD: ấm đun nước pha trà giữ nhiệt, máy hút chân không thực phẩm mini, cân điện tử nhà bếp chống nước, nhiệt kế nấu ăn điện tử, máy đánh bọt cafe cầm tay, bình xịt dầu ăn phun sương).\n"
+            f"- `CLEANING_CARE`: {ROOT_DOMAINS['CLEANING_CARE']} (VD: máy hút bụi giường nệm tia UV, chổi cọ nhà tắm điện không dây, cây lau nhà phun sương/tự vắt, máy giặt thảm sofa cầm tay, máy cắt lông xù quần áo, thùng rác cảm ứng).\n"
+            f"- `MINI_APPLIANCE`: {ROOT_DOMAINS['MINI_APPLIANCE']} (VD: bàn ủi hơi nước cầm tay gấp gọn, máy hút ẩm mini chống nồm, máy lọc không khí HEPA phòng ngủ, máy sấy giày khử mùi, quạt tuần hoàn không khí, máy tăm nước cầm tay).\n"
             + (
-                "Cụ thể với 3 nhóm (`max_categories = 3`), PHẢI có ít nhất 1 nhóm thuộc `TECH_DESK` và ít nhất 1 nhóm thuộc `KITCHEN_TECH` (2-1 hoặc 1-2).\n"
+                "Cụ thể với 3 nhóm (`max_categories = 3`), PHẢI có ít nhất 1 nhóm thuộc `CLEANING_CARE` và ít nhất 1 nhóm thuộc `MINI_APPLIANCE` (2-1 hoặc 1-2).\n"
                 if max_categories == 3
-                else "Với 2 nhóm, PHẢI có đúng 1 nhóm `TECH_DESK` và 1 nhóm `KITCHEN_TECH`.\n"
+                else "Với 2 nhóm, PHẢI có đúng 1 nhóm `CLEANING_CARE` và 1 nhóm `MINI_APPLIANCE`.\n"
             )
             if max_categories >= 2
             else f"Chủ đề gốc cho nhóm duy nhất này: `{domain}` — {ROOT_DOMAINS[domain]}.\n"
         )
 
         system_instruction = (
-            "Bạn là Trưởng bộ phận Nghiên cứu Sản phẩm (Module M0) cho kênh Review Đồ Công Nghệ & Đồ Dùng Bếp khách quan.\n"
+            "Bạn là Trưởng bộ phận Nghiên cứu Sản phẩm (Module M0) cho kênh Review Đồ Vệ Sinh Nhà Cửa & Gia Dụng Mini khách quan.\n"
             "NGUYÊN TẮC BẮT BUỘC:\n"
-            "1. KHÔNG BAO GIỜ đưa tên thương hiệu (như Lock&Lock, Inochi, Baseus, Ugreen...) vào `generic_web_queries_vi` hoặc `generic_youtube_queries_vi`.\n"
-            "2. Từ khóa tìm kiếm ở Bước M0.1 phải hoàn toàn dựa trên CÔNG NĂNG và VẤN ĐỀ (ví dụ: 'cân điện tử nhà bếp chống nước loại nào tốt', 'đèn treo màn hình chống chói mắt', 'giá đỡ laptop nhôm gấp gọn tản nhiệt').\n"
-            "3. Mỗi nhóm `category` phải là MỘT LOẠI THIẾT BỊ HOÀN TOÀN KHÁC NHAU và bắt buộc gán chính xác `domain` (`TECH_DESK` hoặc `KITCHEN_TECH`).\n"
-            "4. Không quyết định kịch bản 1 SKU hay Combo — chỉ tập trung khám phá đúng các nhóm công năng độc lập."
+            "1. KHÔNG BAO GIỜ đưa tên thương hiệu (như Deerma, Xiaomi, Philips, Dreame, Lock&Lock, Inochi...) vào `generic_web_queries_vi` hoặc `generic_youtube_queries_vi`.\n"
+            "2. Từ khóa tìm kiếm ở Bước M0.1 phải hoàn toàn dựa trên CÔNG NĂNG và VẤN ĐỀ (ví dụ: 'máy hút bụi giường nệm tia UV loại nào tốt', 'chổi cọ nhà tắm điện không dây chống nước', 'bàn ủi hơi nước cầm tay gấp gọn không rỉ nước').\n"
+            "3. Mỗi nhóm `category` phải là MỘT LOẠI THIẾT BỊ HOÀN TOÀN KHÁC NHAU và bắt buộc gán chính xác `domain` (`CLEANING_CARE` hoặc `MINI_APPLIANCE`).\n"
+            "4. TUYỆT ĐỐI KHÔNG chọn đồ phụ kiện máy tính/văn phòng (chuột, bàn phím, hub USB, arm màn hình) hay dụng cụ nấu bếp thuần túy — chỉ tập trung 100% vào Đồ vệ sinh & Gia dụng mini!"
         )
 
         prompt = f"""
@@ -903,9 +939,9 @@ class M0AutonomousDiscoveryEngine:
 Số lượng nhóm công năng (`categories`) cần lập kế hoạch: {max_categories} nhóm.
 
 QUY TẮC CHỐNG TRÙNG LẶP & CHỐNG CHẺ NHỎ DUNG TÍCH (STRICT ANTI-SIBLING RULE):
-1. CẤM chọn 2 nhóm công năng cùng một loại thiết bị chỉ khác dung tích/kích thước (VD: TUYỆT ĐỐI CẤM tách cối xay tỏi 180ml và 900ml thành 2 nhóm riêng).
-2. CẤM chọn lại các nhóm sản phẩm đã xuất hiện trong `recent_cats` hoặc `recent_skus` (đặc biệt TUYỆT ĐỐI KHÔNG chọn lại cối xay tỏi ớt kéo tay `pull_cord_garlic_chopper` / `garlic_chopper` / `Lock&Lock CKS321` / `CKS314`; hãy chọn các thiết bị hoàn toàn khác).
-3. Mỗi `category` phải gán đúng trường `domain` (`"TECH_DESK"` hoặc `"KITCHEN_TECH"`).
+1. CẤM chọn 2 nhóm công năng cùng một loại thiết bị chỉ khác dung tích/công suất (VD: TUYỆT ĐỐI CẤM tách máy hút ẩm 1L và 2.5L thành 2 nhóm riêng).
+2. CẤM chọn lại các nhóm sản phẩm đã xuất hiện trong `recent_cats` hoặc `recent_skus`.
+3. Mỗi `category` phải gán đúng trường `domain` (`"CLEANING_CARE"` hoặc `"MINI_APPLIANCE"`).
 
 Lịch sử các ngách/nhóm đã chạy (`recent_cats` — CẤM LẶP LẠI):
 {past_str}
@@ -917,7 +953,7 @@ Các SKU đã làm gần đây (`recent_skus` — CẤM LẶP LẠI DÒNG MÁY N
 
 Hãy xuất JSON theo đúng schema `LLMSubNichePlanResponse` gồm ĐÚNG `{max_categories}` nhóm công năng (`categories`) khác biệt rõ rệt về công dụng.
 Mỗi nhóm công năng phải có:
-- `domain`: `"TECH_DESK"` hoặc `"KITCHEN_TECH"` (phải có cả 2 giá trị trong batch nếu `max_categories >= 2`).
+- `domain`: `"CLEANING_CARE"` hoặc `"MINI_APPLIANCE"` (phải có cả 2 giá trị trong batch nếu `max_categories >= 2`).
 - `generic_web_queries_vi`: 2-3 câu truy vấn tìm kiếm web khách quan, KHÔNG chứa tên hãng.
 - `generic_youtube_queries_vi`: 2 câu truy vấn tìm video review/so sánh trên YouTube, KHÔNG chứa tên hãng.
 """.strip()
@@ -934,7 +970,7 @@ Mỗi nhóm công năng phải có:
         # Deterministic Post-LLM Anti-Duplicate Category Replacement Gate (when no manual topic_hint overrides)
         if not topic_hint:
             seen_batch_canonical: set[str] = set()
-            fresh_pool = fresh_tech + fresh_kitchen
+            fresh_pool = fresh_cleaning + fresh_appliance
             replaced_categories: List[LLMPlannedCategoryQuery] = []
 
             for c in plan.categories:
@@ -981,7 +1017,7 @@ Mỗi nhóm công năng phải có:
         if max_categories >= 2 and len(plan.categories) >= 2:
             present_domains = {c.domain for c in plan.categories}
             if len(present_domains) == 1:
-                missing_domain: DomainId = "TECH_DESK" if "KITCHEN_TECH" in present_domains else "KITCHEN_TECH"
+                missing_domain: DomainId = "MINI_APPLIANCE" if "CLEANING_CARE" in present_domains else "CLEANING_CARE"
                 plan.categories[-1].domain = missing_domain
         return plan
 
@@ -1009,11 +1045,11 @@ Mỗi nhóm công năng phải có:
 
         system_instruction = (
             "Bạn là Chuyên gia Phân tích Thị trường Đa Thương Hiệu (Module M0.3).\n"
-            "Nhiệm vụ của bạn là đọc dữ liệu thu thập từ Web, YouTube và sàn TMĐT của một nhóm công năng, sau đó bóc tách ra **4 đến 5 ứng viên (SKU) cạnh tranh đa thương hiệu** để bàn giao cho Module M1 chấm điểm.\n"
+            "Nhiệm vụ của bạn là đọc dữ liệu thu thập từ Web, YouTube và sàn TMĐT của một nhóm công năng Đồ Vệ Sinh / Gia Dụng Mini, sau đó bóc tách ra **4 đến 5 ứng viên (SKU) cạnh tranh đa thương hiệu** để bàn giao cho Module M1 chấm điểm.\n"
             "QUY TẮC CÔNG BẰNG & CHỐNG THIÊN VỊ:\n"
-            "1. BẮT BUỘC phải có ít nhất **2 đến 3 thương hiệu có tên tuổi KHÁC NHAU** cạnh tranh trực tiếp trong cùng nhóm công năng (ví dụ với đồ bếp: Lock&Lock vs Inochi vs Elmich / Bear / Kai / Joseph Joseph; với đồ công nghệ: Ugreen vs Baseus vs HyperWork / Anker / Logitech / Orico).\n"
+            "1. BẮT BUỘC phải có ít nhất **2 đến 3 thương hiệu có tên tuổi KHÁC NHAU** cạnh tranh trực tiếp trong cùng nhóm công năng (ví dụ với đồ vệ sinh: Deerma vs Xiaomi vs Dreame / Karcher / Lock&Lock / Inochi / HOTO; với gia dụng mini: Philips vs Tefal vs Panasonic / Levoit / Bear / Lumias / Simplus).\n"
             "2. BẮT BUỘC phải có ít nhất **1 ứng viên thuộc nhóm `OEM_GENERIC`** (hàng không thương hiệu / phổ thông giá rẻ trên sàn) để Module M1 làm mốc đối chiếu giá trung vị và chất lượng.\n"
-            "3. Nếu trong dữ liệu có tin đăng gộp nhiều mã lập lờ (ví dụ tiêu đề ghi chung CKS321 / EJM416 / nhiều dung tích để mồi giá rẻ) hoặc mẫu có lỗi nghiêm trọng, hãy tách riêng hoặc gắn đúng `archetype` / `caveat_severity`.\n"
+            "3. Nếu trong dữ liệu có tin đăng gộp nhiều mã lập lờ (ví dụ tiêu đề ghi chung nhiều model/dung tích để mồi giá rẻ) hoặc mẫu có lỗi nghiêm trọng, hãy tách riêng hoặc gắn đúng `archetype` / `caveat_severity`.\n"
             "4. Mọi ứng viên ĐỀU PHẢI CÓ `honest_caveat_vi` (nhược điểm thực tế hoặc giới hạn sử dụng thật, không được khen 100%).\n"
             "5. BẮT BUỘC 100% TIẾNG VIỆT CÓ DẤU ĐẦY ĐỦ CHUẨN UTF-8: Kể cả khi tiêu đề trên sàn TMĐT / YouTube viết không dấu, bạn BẮT BUỘC phải chuyển hóa `product_name_vi`, `key_specs_pairs`, `highlight_pros_vi`, `honest_caveat_vi` sang tiếng Việt CÓ DẤU ĐẦY ĐỦ."
         )
@@ -1024,7 +1060,7 @@ Mỗi nhóm công năng phải có:
         anti_sibling_brand_rule = (
             f"\n⚠️ CẤM CHỌN BIẾN THỂ CÙNG HÃNG ĐÃ LÊN SÓNG TRONG 30 NGÀY QUA Ở NHÓM `{cat_plan.category_id}`: "
             f"{', '.join(b.upper() for b in blocked_brands_30d)} "
-            "(VD đã làm Baseus i-wok2 thì CẤM chọn Baseus i-Wok Pro / Lite; hãy chọn các hãng đối thủ khác!).\n"
+            "(VD đã làm Deerma CM800 thì CẤM chọn Deerma CM1300 / CM1900; hãy chọn các hãng đối thủ khác!).\n"
             if blocked_brands_30d
             else ""
         )
@@ -1236,7 +1272,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run Module M0: Autonomous Multi-Brand SKU Discovery.")
     parser.add_argument(
         "--domain",
-        choices=["TECH_DESK", "KITCHEN_TECH"],
+        choices=["CLEANING_CARE", "MINI_APPLIANCE"],
         default=None,
         help="Optional root domain override (defaults to auto-alternating via m0_history.json)",
     )

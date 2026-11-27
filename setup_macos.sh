@@ -18,7 +18,7 @@ BIN_DIR="$PROJECT_DIR/bin"
 LOG_DIR="$PROJECT_DIR/logs"
 VENV_DIR="$PROJECT_DIR/.venv"
 CA_BUNDLE="$PROJECT_DIR/config/cacert.pem"
-PLIST_LABEL="com.congnghe.autopipeline"
+PLIST_LABEL="com.giadungmini.autopipeline"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 PLIST_PATH="$LAUNCH_AGENTS_DIR/${PLIST_LABEL}.plist"
 
@@ -46,7 +46,7 @@ safe_curl() {
 }
 
 echo "======================================================================"
-echo "  CAI DAT HE THONG CONG NGHE SHORT VIDEO AUTOPILOT"
+echo "  CAI DAT HE THONG GIA DUNG MINI & DO VE SINH SHORT VIDEO AUTOPILOT"
 echo "  May: $HOSTNAME_SHORT | CPU: $ARCH | macOS: $MACOS_VER"
 echo "  Thu muc: $PROJECT_DIR"
 echo "======================================================================"
@@ -59,7 +59,7 @@ xattr -dr com.apple.quarantine "$PROJECT_DIR" >/dev/null 2>&1 || true
 if ! command -v uv >/dev/null 2>&1 || ! uv --version >/dev/null 2>&1; then
     rm -f "$BIN_DIR/uv"
     echo "[SETUP] Dang tai trinh quan ly Python uv (build san cho macOS $ARCH, minos 10.12)..."
-    TMP_UV_DIR="$(mktemp -d /tmp/congnghe_uv.XXXXXX)"
+    TMP_UV_DIR="$(mktemp -d /tmp/giadungmini_uv.XXXXXX)"
     if [ "$ARCH" = "arm64" ]; then
         UV_URL="https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz"
     else
@@ -176,8 +176,8 @@ if [ "$VERIFY_ONLY" = "1" ]; then
     exit 0
 fi
 
-# 6. Install & Activate Background LaunchAgent (Runs every 35 minutes with caffeinate + nice +10)
-echo "[LAUNCHD] Dang cai dat lich tu chay ngam $PLIST_LABEL (chu ky 35 phut)..."
+# 6. Install & Activate Background LaunchAgent (Runs every 38 minutes = 2280s, staggered from Channel #1's 2100s!)
+echo "[LAUNCHD] Dang cai dat lich tu chay ngam $PLIST_LABEL (chu ky lech pha 38 phut = 2280s)..."
 cat > "$PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -215,9 +215,9 @@ cat > "$PLIST_PATH" <<EOF
     <key>Nice</key>
     <integer>10</integer>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>StartInterval</key>
-    <integer>2100</integer>
+    <integer>2280</integer>
     <key>StandardOutPath</key>
     <string>${LOG_DIR}/launchd_stdout.log</string>
     <key>StandardErrorPath</key>
@@ -239,7 +239,7 @@ fi
 echo "[OK] Da kich hoat LaunchAgent: $PLIST_PATH"
 
 # 6b. Install & Activate 24/7 Telegram Health Bot Menu Listener (KeepAlive, zero extra deps)
-TG_PLIST_LABEL="com.congnghe.telegrambot"
+TG_PLIST_LABEL="com.giadungmini.telegrambot"
 TG_PLIST_PATH="$LAUNCH_AGENTS_DIR/${TG_PLIST_LABEL}.plist"
 cat > "$TG_PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -307,7 +307,7 @@ if n.is_configured():
         [
             f"💻 May: {host_short} ({platform.machine()} / macOS {mac_ver})",
             f"⚙️ FFmpeg threads gioi han: {MacOSLegacyRuntime.optimal_ffmpeg_threads()} (nice +10)",
-            f"⏰ LaunchAgent: {plist_label} (chu ky 35 phut, chi hoat dong 08:15 - 22:15)",
+            f"⏰ LaunchAgent: {plist_label} (chu ky lech pha 38 phut, chi hoat dong khung gio nguoi that)",
             f"📂 Thu muc: {proj_dir}",
         ],
     )

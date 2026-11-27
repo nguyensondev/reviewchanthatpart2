@@ -33,6 +33,7 @@ import asyncio
 import base64
 import datetime as dt
 import json
+import os
 import random
 import re
 import shutil
@@ -549,7 +550,7 @@ def _paste_rounded_cover_photo(
     photo: Image.Image,
     box: Tuple[int, int, int, int],
     radius: int = 36,
-    rim_color: Tuple[int, int, int] = (255, 196, 52),
+    rim_color: Tuple[int, int, int] = (48, 228, 206),
 ) -> None:
     """Crop/fit `photo` strictly into `box=(x0, y0, x1, y1)` with rounded corners and uniform studio rim."""
     x0, y0, x1, y1 = box
@@ -568,7 +569,7 @@ def _paste_rounded_cover_photo(
 
     canvas.paste(fitted, (x0, y0), mask)
 
-    # Clean gold-accent border so every video cover shares identical framing geometry
+    # Clean aqua-mint/emerald accent border so every video cover shares identical framing geometry
     d = ImageDraw.Draw(canvas)
     d.rounded_rectangle([x0, y0, x1 - 1, y1 - 1], radius=radius, outline=(*rim_color, 255), width=4)
 
@@ -579,21 +580,29 @@ def render_uniform_sku_cover_jpeg(
     brand_model_badge: str,
     price_badge: str,
     hook_title_vi: str,
-    domain: str = "TECH_DESK",
+    domain: str = "CLEANING_CARE",
 ) -> Path:
     """
     Render a strictly uniform 9:16 (`1080x1920`) studio cover thumbnail for YouTube Shorts & Facebook Reels.
-    Every single video on the channel shares the exact same SKU frame size (`900x820`), header bar,
-    price badge, and bottom 2-line Hook typography — eliminating messy auto-selected frames.
+    Visual Identity for Channel #2 (Cleaning & Mini Home Appliances):
+      - Clean Ocean-Teal (`CLEANING_CARE`) & Forest-Emerald (`MINI_APPLIANCE`) studio gradients
+      - Crisp Aqua-Mint / Fresh Emerald accents (`#30E4CE` / `#34E89E`), 100% distinct from Channel #1's Navy+Gold
+      - Locked `900x850` SKU showcase frame, header bar, price pill, and bottom 2-line Hook typography.
     """
     w, h = 1080, 1920
-    canvas = Image.new("RGBA", (w, h), (13, 19, 32, 255))
+    is_cleaning = domain == "CLEANING_CARE"
+    top_rgb = (9, 34, 44) if is_cleaning else (11, 36, 31)
+    mid_rgb = (16, 56, 70) if is_cleaning else (20, 58, 49)
+    bot_rgb = (6, 18, 25) if is_cleaning else (7, 20, 18)
+    accent_rgb = (48, 228, 206) if is_cleaning else (52, 232, 158)
+    pill_bg_rgba = (16, 48, 60, 242) if is_cleaning else (18, 50, 44, 242)
+    pill_border_rgba = (72, 168, 180, 225) if is_cleaning else (76, 174, 146, 225)
+    header_txt_rgba = (164, 214, 222, 255) if is_cleaning else (168, 220, 202, 255)
+
+    canvas = Image.new("RGBA", (w, h), (*bot_rgb, 255))
     d = ImageDraw.Draw(canvas)
 
-    # 1. Consistent vertical studio gradient (deep navy-slate for TECH_DESK, warm charcoal-slate for HOME_KITCHEN)
-    top_rgb = (16, 25, 44) if domain == "TECH_DESK" else (24, 24, 34)
-    mid_rgb = (26, 39, 64) if domain == "TECH_DESK" else (38, 36, 48)
-    bot_rgb = (10, 14, 24)
+    # 1. Consistent vertical studio gradient (Clean Ocean-Teal vs Forest-Emerald)
     for row in range(0, h, 4):
         t = row / float(h)
         if t < 0.5:
@@ -608,14 +617,14 @@ def render_uniform_sku_cover_jpeg(
             b = int(mid_rgb[2] * (1 - u) + bot_rgb[2] * u)
         d.rectangle([0, row, w, row + 4], fill=(r, g, b, 255))
 
-    # Top thin gold brand bar
-    d.rectangle([0, 0, w, 10], fill=(255, 196, 52, 255))
+    # Top thin aqua-mint / emerald brand bar
+    d.rectangle([0, 0, w, 10], fill=(*accent_rgb, 255))
 
-    # 2. Fixed Channel Authority Header (`y=52`)
+    # 2. Fixed Channel Authority Header (`y=52`, customizable via CHANNEL_COVER_HEADER_VI in .env)
     f_ch = ImageFont.truetype(FONT_BOLD_PATH, 28)
-    ch_txt = "GÓC REVIEW CHÂN THỰC  •  CHÍNH HÃNG"
+    ch_txt = (os.environ.get("CHANNEL_COVER_HEADER_VI") or "").strip().upper() or "NHÀ SẠCH TIỆN NGHI  •  CHÍNH HÃNG"
     ch_bb = d.textbbox((0, 0), ch_txt, font=f_ch)
-    d.text(((w - (ch_bb[2] - ch_bb[0])) // 2, 54), ch_txt, font=f_ch, fill=(168, 184, 210, 255))
+    d.text(((w - (ch_bb[2] - ch_bb[0])) // 2, 54), ch_txt, font=f_ch, fill=header_txt_rgba)
 
     # 3. Fixed Top Brand/Model + Price Pill Bar (`y=124..228`)
     clean_bm = truncate_words_clean(
@@ -637,30 +646,30 @@ def render_uniform_sku_cover_jpeg(
         start_x = max(56, (w - total_w) // 2)
         bm_box = [start_x, pill_y0, start_x + bm_w + 56, pill_y0 + pill_h]
         pr_box = [bm_box[2] + gap, pill_y0, bm_box[2] + gap + pr_w + 52, pill_y0 + pill_h]
-        d.rounded_rectangle(bm_box, radius=24, fill=(30, 42, 68, 240), outline=(96, 120, 162, 220), width=2)
+        d.rounded_rectangle(bm_box, radius=24, fill=pill_bg_rgba, outline=pill_border_rgba, width=2)
         d.text((bm_box[0] + 28, pill_y0 + 18), clean_bm, font=f_bm, fill=(255, 255, 255, 255))
-        d.rounded_rectangle(pr_box, radius=24, fill=(255, 196, 52, 255))
-        d.text((pr_box[0] + 26, pill_y0 + 18), clean_pr, font=f_pr, fill=(18, 22, 34, 255))
+        d.rounded_rectangle(pr_box, radius=24, fill=(*accent_rgb, 255))
+        d.text((pr_box[0] + 26, pill_y0 + 18), clean_pr, font=f_pr, fill=(8, 26, 24, 255))
     else:
         bm_box = [(w - (bm_w + 64)) // 2, pill_y0, (w + (bm_w + 64)) // 2, pill_y0 + pill_h]
-        d.rounded_rectangle(bm_box, radius=24, fill=(30, 42, 68, 240), outline=(255, 196, 52, 220), width=2)
+        d.rounded_rectangle(bm_box, radius=24, fill=pill_bg_rgba, outline=(*accent_rgb, 220), width=2)
         d.text((bm_box[0] + 32, pill_y0 + 18), clean_bm, font=f_bm, fill=(255, 255, 255, 255))
 
     # 4. Fixed-Size Locked SKU Product Showcase Box (`x=90..990, y=266..1116` -> exact 900x850 px!)
     valid_photos = [p for p in sku_photos if p is not None]
     if len(valid_photos) >= 2:
-        # Combo 2 SKU: 2 strictly equal stacked frames (900x410 each) + center '+' gold badge
-        _paste_rounded_cover_photo(canvas, valid_photos[0], (90, 266, 990, 676), radius=34)
-        _paste_rounded_cover_photo(canvas, valid_photos[1], (90, 706, 990, 1116), radius=34)
+        # Combo 2 SKU: 2 strictly equal stacked frames (900x410 each) + center '+' aqua-mint badge
+        _paste_rounded_cover_photo(canvas, valid_photos[0], (90, 266, 990, 676), radius=34, rim_color=accent_rgb)
+        _paste_rounded_cover_photo(canvas, valid_photos[1], (90, 706, 990, 1116), radius=34, rim_color=accent_rgb)
         cx, cy = 540, 691
-        d.ellipse([cx - 38, cy - 38, cx + 38, cy + 38], fill=(255, 196, 52, 255), outline=(18, 24, 38, 255), width=5)
+        d.ellipse([cx - 38, cy - 38, cx + 38, cy + 38], fill=(*accent_rgb, 255), outline=(8, 26, 24, 255), width=5)
         f_plus = ImageFont.truetype(FONT_BOLD_PATH, 54)
         pb = d.textbbox((0, 0), "+", font=f_plus)
-        d.text((cx - (pb[2] - pb[0]) // 2, cy - (pb[3] - pb[1]) // 2 - 6), "+", font=f_plus, fill=(18, 24, 38, 255))
+        d.text((cx - (pb[2] - pb[0]) // 2, cy - (pb[3] - pb[1]) // 2 - 6), "+", font=f_plus, fill=(8, 26, 24, 255))
     elif len(valid_photos) == 1:
-        _paste_rounded_cover_photo(canvas, valid_photos[0], (90, 266, 990, 1116), radius=38)
+        _paste_rounded_cover_photo(canvas, valid_photos[0], (90, 266, 990, 1116), radius=38, rim_color=accent_rgb)
     else:
-        d.rounded_rectangle([90, 266, 990, 1116], radius=38, fill=(28, 38, 58, 255), outline=(255, 196, 52, 255), width=4)
+        d.rounded_rectangle([90, 266, 990, 1116], radius=38, fill=pill_bg_rgba, outline=(*accent_rgb, 255), width=4)
 
     # 5. Fixed Bottom Bold 2-Line Hook Title (`y=1180..1490`)
     clean_hook = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%]", "", (hook_title_vi or "").strip()).upper()
@@ -670,20 +679,20 @@ def render_uniform_sku_cover_jpeg(
     for idx_h, h_ln in enumerate(hook_lines):
         hb = d.textbbox((0, 0), h_ln, font=f_hk)
         hx = (w - (hb[2] - hb[0])) // 2
-        fill_col = (255, 255, 255, 255) if idx_h == 0 else (255, 204, 64, 255)
+        fill_col = (255, 255, 255, 255) if idx_h == 0 else (*accent_rgb, 255)
         # Crisp dark shadow for legibility
-        d.text((hx + 3, hk_y + 4), h_ln, font=f_hk, fill=(0, 0, 0, 210))
+        d.text((hx + 3, hk_y + 4), h_ln, font=f_hk, fill=(0, 0, 0, 215))
         d.text((hx, hk_y), h_ln, font=f_hk, fill=fill_col)
         hk_y += 104
 
     # 6. Fixed Bottom Trust Pill (`y=1475..1545`, safely above YouTube Shorts / FB Reels bottom UI!)
-    trust_txt = "REVIEW THỰC TẾ  •  THÔNG SỐ CHUẨN HÃNG"
+    trust_txt = "DỌN NHÀ NHÀN TÊNH  •  THÔNG SỐ CHUẨN HÃNG"
     f_tr = ImageFont.truetype(FONT_BOLD_PATH, 28)
     tb = d.textbbox((0, 0), trust_txt, font=f_tr)
     tw = tb[2] - tb[0]
     tx0 = (w - (tw + 64)) // 2
-    d.rounded_rectangle([tx0, 1480, tx0 + tw + 64, 1546], radius=20, fill=(32, 46, 72, 235), outline=(88, 112, 154, 220), width=2)
-    d.text((tx0 + 32, 1496), trust_txt, font=f_tr, fill=(224, 232, 246, 255))
+    d.rounded_rectangle([tx0, 1480, tx0 + tw + 64, 1546], radius=20, fill=pill_bg_rgba, outline=pill_border_rgba, width=2)
+    d.text((tx0 + 32, 1496), trust_txt, font=f_tr, fill=(228, 246, 244, 255))
 
     out_jpg_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_jpg = out_jpg_path.with_suffix(".tmp.jpg")
@@ -706,27 +715,27 @@ def _render_pil_score_verdict_card(
     d.rounded_rectangle(
         [0, 0, w - 1, h - 1],
         radius=30,
-        fill=(22, 29, 44, 222),
-        outline=(255, 196, 52, 255),
+        fill=(12, 36, 44, 226),
+        outline=(48, 228, 206, 255),
         width=3,
     )
-    # Left gold score badge box
+    # Left aqua-mint score badge box
     d.rounded_rectangle(
         [22, 22, 240, h - 22],
         radius=22,
-        fill=(38, 49, 72, 245),
-        outline=(255, 196, 52, 180),
+        fill=(18, 52, 62, 245),
+        outline=(48, 228, 206, 185),
         width=2,
     )
     clamped = min(9.6, max(8.0, round(float(score_10), 1)))
-    d.text((44, 46), f"{clamped:.1f}", font=ImageFont.truetype(FONT_BOLD_PATH, 78), fill=(255, 196, 52, 255))
-    d.text((164, 82), "/10", font=ImageFont.truetype(FONT_BOLD_PATH, 32), fill=(210, 218, 232, 255))
-    d.text((44, 152), "ĐIỂM THỰC TẾ", font=ImageFont.truetype(FONT_BOLD_PATH, 22), fill=(235, 240, 248, 255))
-    d.text((52, 186), "Kiểm chứng M1", font=ImageFont.truetype(FONT_REG_PATH, 20), fill=(175, 188, 208, 255))
+    d.text((44, 46), f"{clamped:.1f}", font=ImageFont.truetype(FONT_BOLD_PATH, 78), fill=(52, 232, 178, 255))
+    d.text((164, 82), "/10", font=ImageFont.truetype(FONT_BOLD_PATH, 32), fill=(210, 234, 236, 255))
+    d.text((44, 152), "ĐIỂM THỰC TẾ", font=ImageFont.truetype(FONT_BOLD_PATH, 22), fill=(235, 248, 246, 255))
+    d.text((52, 186), "Kiểm chứng M1", font=ImageFont.truetype(FONT_REG_PATH, 20), fill=(168, 212, 216, 255))
 
     # Right verdict & price content
-    d.rounded_rectangle([268, 26, 610, 70], radius=14, fill=(39, 174, 96, 235))
-    d.text((286, 35), "THỰC DỤNG • ĐÁNG TIỀN", font=ImageFont.truetype(FONT_BOLD_PATH, 24), fill=(255, 255, 255, 255))
+    d.rounded_rectangle([268, 26, 610, 70], radius=14, fill=(16, 168, 128, 240))
+    d.text((286, 35), "NHÀ SẠCH • ĐÁNG TIỀN", font=ImageFont.truetype(FONT_BOLD_PATH, 24), fill=(255, 255, 255, 255))
 
     clean_bm = re.sub(r"[^\w\sÀ-ỹ.\-+]", " ", brand_model_label or "").strip()[:28]
     d.text((268, 80), clean_bm or "Sản phẩm chính hãng", font=ImageFont.truetype(FONT_BOLD_PATH, 33), fill=(255, 255, 255, 255))
@@ -734,11 +743,11 @@ def _render_pil_score_verdict_card(
     clean_verdict = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", verdict_line_vi or "").strip()
     wrapped_v = _wrap_card_text(clean_verdict, max_chars_per_line=40, max_lines=2) or ["Hoàn thiện chắc chắn, đúng thông số"]
     for idx_v, v_ln in enumerate(wrapped_v[:2]):
-        d.text((268, 124 + idx_v * 30), v_ln, font=ImageFont.truetype(FONT_REG_PATH, 24), fill=(218, 226, 238, 255))
+        d.text((268, 124 + idx_v * 30), v_ln, font=ImageFont.truetype(FONT_REG_PATH, 24), fill=(220, 240, 240, 255))
 
-    d.line([(268, 192), (w - 30, 192)], fill=(70, 84, 110, 200), width=2)
-    d.text((268, 206), f"Giá tham khảo: {price_label[:12]}", font=ImageFont.truetype(FONT_BOLD_PATH, 34), fill=(255, 196, 52, 255))
-    d.text((268, 248), "Xem chỗ mua chính hãng ở bình luận / Bio", font=ImageFont.truetype(FONT_REG_PATH, 22), fill=(195, 205, 220, 255))
+    d.line([(268, 192), (w - 30, 192)], fill=(58, 114, 124, 200), width=2)
+    d.text((268, 206), f"Giá tham khảo: {price_label[:12]}", font=ImageFont.truetype(FONT_BOLD_PATH, 34), fill=(52, 232, 178, 255))
+    d.text((268, 248), "Xem chỗ mua chính hãng ở bình luận / Bio", font=ImageFont.truetype(FONT_REG_PATH, 22), fill=(190, 222, 224, 255))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
@@ -755,7 +764,7 @@ def _render_pil_versus_2col_card(
     w, h = 840, 290
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=30, fill=(20, 26, 40, 224), outline=(90, 106, 136, 230), width=2)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=30, fill=(12, 34, 42, 226), outline=(68, 148, 158, 230), width=2)
 
     # Left column: Cheap Generic / OEM
     d.rounded_rectangle([18, 18, 408, h - 18], radius=22, fill=(46, 28, 34, 225), outline=(235, 87, 87, 220), width=2)
@@ -767,17 +776,17 @@ def _render_pil_versus_2col_card(
     d.text((36, 224), "• Không bảo hành hãng", font=ImageFont.truetype(FONT_REG_PATH, 24), fill=(200, 180, 180, 255))
 
     # Right column: Official Brand Winner
-    d.rounded_rectangle([428, 18, w - 18, h - 18], radius=22, fill=(24, 48, 42, 232), outline=(46, 204, 113, 245), width=3)
+    d.rounded_rectangle([428, 18, w - 18, h - 18], radius=22, fill=(18, 52, 48, 236), outline=(52, 232, 168, 245), width=3)
     _draw_vector_check_badge(d, 458, 50, r=16)
     clean_b = re.sub(r"[^\w\sÀ-ỹ.\-+]", " ", genuine_brand_label or "").strip()[:17] or "CHÍNH HÃNG"
-    d.text((484, 34), clean_b.upper(), font=ImageFont.truetype(FONT_BOLD_PATH, 27), fill=(110, 242, 165, 255))
-    d.text((448, 80), genuine_price_label[:14], font=ImageFont.truetype(FONT_BOLD_PATH, 44), fill=(255, 196, 52, 255))
+    d.text((484, 34), clean_b.upper(), font=ImageFont.truetype(FONT_BOLD_PATH, 27), fill=(110, 246, 190, 255))
+    d.text((448, 80), genuine_price_label[:14], font=ImageFont.truetype(FONT_BOLD_PATH, 44), fill=(52, 232, 178, 255))
 
     clean_hl = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", genuine_highlight_vi or "").strip()
     hl_short = (_wrap_card_text(clean_hl, max_chars_per_line=24, max_lines=1) or ["Chuẩn thông số thật"])[0]
-    d.text((448, 142), f"• {hl_short}", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(242, 250, 245, 255))
-    d.text((448, 182), "• Hoàn thiện bền, an tâm", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(242, 250, 245, 255))
-    d.text((448, 224), "• Gian hàng Mall ở Bio/Cmt", font=ImageFont.truetype(FONT_BOLD_PATH, 23), fill=(255, 214, 102, 255))
+    d.text((448, 142), f"• {hl_short}", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(242, 252, 248, 255))
+    d.text((448, 182), "• Hoàn thiện bền, an tâm", font=ImageFont.truetype(FONT_REG_PATH, 25), fill=(242, 252, 248, 255))
+    d.text((448, 224), "• Gian hàng Mall ở Bio/Cmt", font=ImageFont.truetype(FONT_BOLD_PATH, 23), fill=(120, 248, 214, 255))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
@@ -793,27 +802,27 @@ def _render_pil_buy_skip_card(
     w, h = 840, 290
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=30, fill=(22, 29, 44, 224), outline=(255, 196, 52, 255), width=3)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=30, fill=(12, 36, 44, 226), outline=(48, 228, 206, 255), width=3)
 
     # Header bar
-    d.text((34, 22), "CHỐT NHANH TRƯỚC KHI MUA", font=ImageFont.truetype(FONT_BOLD_PATH, 30), fill=(255, 196, 52, 255))
-    d.rounded_rectangle([596, 16, w - 26, 66], radius=16, fill=(46, 58, 84, 245), outline=(255, 196, 52, 200), width=2)
+    d.text((34, 22), "CHỐT NHANH TRƯỚC KHI MUA", font=ImageFont.truetype(FONT_BOLD_PATH, 30), fill=(52, 232, 178, 255))
+    d.rounded_rectangle([596, 16, w - 26, 66], radius=16, fill=(20, 58, 68, 245), outline=(48, 228, 206, 200), width=2)
     f_p = ImageFont.truetype(FONT_BOLD_PATH, 30)
     p_txt = price_label[:12]
     p_bbox = d.textbbox((0, 0), p_txt, font=f_p)
     p_w = p_bbox[2] - p_bbox[0]
     p_x = 596 + max(12, ((w - 26 - 596) - p_w) // 2)
-    d.text((p_x, 23), p_txt, font=f_p, fill=(255, 214, 92, 255))
-    d.line([(34, 76), (w - 34, 76)], fill=(68, 82, 108, 200), width=2)
+    d.text((p_x, 23), p_txt, font=f_p, fill=(116, 248, 214, 255))
+    d.line([(34, 76), (w - 34, 76)], fill=(58, 114, 124, 200), width=2)
 
     # Row 1: NÊN MUA
-    d.rounded_rectangle([32, 96, 206, 146], radius=14, fill=(39, 174, 96, 240))
-    _draw_vector_check_badge(d, 56, 121, r=13, color=(24, 128, 68))
+    d.rounded_rectangle([32, 96, 206, 146], radius=14, fill=(18, 172, 124, 242))
+    _draw_vector_check_badge(d, 56, 121, r=13, color=(12, 116, 82))
     d.text((76, 106), "NÊN MUA", font=ImageFont.truetype(FONT_BOLD_PATH, 24), fill=(255, 255, 255, 255))
     clean_buy = re.sub(r"[^\w\sÀ-ỹ.,:;!?/()~+\-&%°]", "", buy_if_vi or "").strip()
     buy_lines = _wrap_card_text(clean_buy, max_chars_per_line=38, max_lines=2) or ["Cần độ bền ổn định & dùng hàng ngày"]
     for idx_l, ln in enumerate(buy_lines[:2]):
-        d.text((224, 96 + idx_l * 34), ln, font=ImageFont.truetype(FONT_REG_PATH, 26), fill=(242, 248, 244, 255))
+        d.text((224, 96 + idx_l * 34), ln, font=ImageFont.truetype(FONT_REG_PATH, 26), fill=(242, 250, 248, 255))
 
     # Row 2: CÂN NHẮC
     d.rounded_rectangle([32, 186, 206, 236], radius=14, fill=(230, 126, 34, 240))
@@ -839,12 +848,12 @@ def _render_pil_price_card(
     d.rounded_rectangle(
         [0, 0, w - 1, h - 1],
         radius=30,
-        fill=(34, 42, 58, 202),
-        outline=(255, 196, 52, 255),
+        fill=(14, 42, 50, 212),
+        outline=(48, 228, 206, 255),
         width=3,
     )
-    d.text((36, 20), "Giá tham khảo", font=ImageFont.truetype(FONT_REG_PATH, 32), fill=(220, 220, 220, 255))
-    d.text((36, 64), price_label[:14], font=ImageFont.truetype(FONT_BOLD_PATH, 76), fill=(255, 196, 52, 255))
+    d.text((36, 20), "Giá tham khảo", font=ImageFont.truetype(FONT_REG_PATH, 32), fill=(216, 236, 236, 255))
+    d.text((36, 64), price_label[:14], font=ImageFont.truetype(FONT_BOLD_PATH, 76), fill=(52, 232, 178, 255))
     d.text((320, 102), subtitle_label[:24], font=ImageFont.truetype(FONT_BOLD_PATH, 28), fill=(255, 255, 255, 255))
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
@@ -1998,8 +2007,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         links: Dict[str, str] = {}
         offer_lines: List[str] = []
         tags: List[str] = [
-            "#reviewcogia",
-            "#gocnhabep" if script.domain == "KITCHEN_TECH" else "#techsetup",
+            "#reviewgiadungmini",
+            "#vesinhnhacua" if script.domain == "CLEANING_CARE" else "#giadungmini",
             "#muagiachinhhang",
         ]
 
@@ -2810,7 +2819,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         Select up to `limit` scripts maximizing:
           1. Strict Zero SKU Overlap (within the same day AND across the 3-7 day SKU cooldown window
              when `enforce_sku_cooldown=True`).
-          2. Domain harmony (`TECH_DESK` + `KITCHEN_TECH`), category uniqueness, and angle diversity.
+          2. Domain harmony (`CLEANING_CARE` + `MINI_APPLIANCE`), category uniqueness, and angle diversity.
         """
         if limit <= 0 or not candidates:
             return []

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.congnghe.m4_renderer</string>
+    <string>com.giadungmini.m4_renderer</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
@@ -13,14 +13,14 @@
         <string>auto</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/sonnguyen/Projects/congnghe</string>
+    <string>/Users/sonnguyen/Projects/giadungmini</string>
     <key>StartInterval</key>
-    <integer>900</integer>
+    <integer>2280</integer>
     <key>RunAtLoad</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/Users/sonnguyen/Projects/congnghe/data/m4_launchd.stdout.log</string>
+    <string>/Users/sonnguyen/Projects/giadungmini/logs/launchd_stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/sonnguyen/Projects/congnghe/data/m4_launchd.stderr.log</string>
+    <string>/Users/sonnguyen/Projects/giadungmini/logs/launchd_stderr.log</string>
 </dict>
 </plist>

@@ -302,8 +302,8 @@ def main() -> int:
         )
 
     rendered_domains = {rv.domain for rv in m4_out.rendered_videos}
-    assert rendered_domains == {"TECH_DESK", "KITCHEN_TECH"}, (
-        f"Expected both TECH_DESK and KITCHEN_TECH domains, got {rendered_domains}"
+    assert rendered_domains == {"CLEANING_CARE", "MINI_APPLIANCE"}, (
+        f"Expected both CLEANING_CARE and MINI_APPLIANCE domains, got {rendered_domains}"
     )
 
     print("\n=== [TEST M4.2] 2-Hour Render Cooldown Gate Verification ===", flush=True)

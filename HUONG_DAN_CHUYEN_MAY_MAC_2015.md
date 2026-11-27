@@ -8,19 +8,19 @@ Tài liệu này được kiểm chứng thực tế cho đúng cấu hình **Ma
 
 ---
 
-## Bước 1: Chép thư mục `congnghe` sang MacBook Pro 2015 (giữ nguyên file ẩn `.env`)
+## Bước 1: Chép thư mục `giadungmini` sang MacBook Pro 2015 (giữ nguyên file ẩn `.env`)
 
 Trên máy hiện tại, mở Terminal chạy lệnh nén này để không bị sót file ẩn `.env` và `config/platform_credentials.json`:
 
 ```bash
 cd /Users/sonnguyen/Projects
-zip -r congnghe_mac2015.zip congnghe -x "congnghe/.venv/*" "congnghe/bin/*" "congnghe/logs/*" "congnghe/data/m4_work/*" "congnghe/data/m4_video_cache/*" "congnghe/pipeline/__pycache__/*"
+zip -r giadungmini_mac2015.zip giadungmini -x "giadungmini/.venv/*" "giadungmini/bin/*" "giadungmini/logs/*" "giadungmini/data/m4_work/*" "giadungmini/data/m4_video_cache/*" "giadungmini/pipeline/__pycache__/*"
 ```
 
-Chép `congnghe_mac2015.zip` qua USB / ổ cứng / AirDrop sang MacBook Pro 2015, giải nén ra (ví dụ `~/Projects/congnghe`), rồi kiểm tra chắc chắn đủ 2 file cấu hình mật:
+Chép `giadungmini_mac2015.zip` qua USB / ổ cứng / AirDrop sang MacBook Pro 2015 (hoặc `git clone https://github.com/nguyensondev/reviewchanthatpart2.git giadungmini`), rồi kiểm tra chắc chắn đủ 2 file cấu hình mật:
 
 ```bash
-cd ~/Projects/congnghe
+cd ~/Projects/giadungmini
 ls -la .env config/platform_credentials.json config/cacert.pem
 ```
 
@@ -32,7 +32,7 @@ ls -la .env config/platform_credentials.json config/cacert.pem
 bash setup_macos.sh
 ```
 
-*(Thời gian cài đặt khoảng **1 – 2 phút**: tự tải `ffmpeg/ffprobe` tĩnh cho macOS 10.13+ Intel, cài Python 3.11 + wheels, kiểm định 5/5 tiêu chí, bật `launchd` chạy ngầm mỗi 35 phút và bắn tin nhắn xác nhận về Bot Telegram `@ethrcbot`).*
+*(Thời gian cài đặt khoảng **1 – 2 phút**: tự tải `ffmpeg/ffprobe` tĩnh cho macOS 10.13+ Intel, cài Python 3.11 + wheels, kiểm định 5/5 tiêu chí, bật `launchd` riêng biệt `com.giadungmini.autopipeline` lệch pha 38 phút để không bao giờ đụng FFmpeg với Kênh #1, và bắn tin nhắn xác nhận về Bot Telegram mới của Kênh #2).*
 
 ---
 

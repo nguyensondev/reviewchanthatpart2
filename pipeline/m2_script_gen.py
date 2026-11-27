@@ -104,8 +104,8 @@ def recommend_angles_for_category(
 ) -> List[NarrativeAngle]:
     """
     Smart Context-Matched Angle Recommender (Upgrade 1):
-    Maps each product category to the storytelling formats that fit its real physical/usage nature
-    so M2 never applies an awkward or hallucinated angle.
+    Maps each Cleaning & Mini Home Appliance category to the storytelling formats that fit its
+    real physical/usage nature so M2 never applies an awkward or hallucinated angle.
     """
     cid = (category_id or "").lower()
     if is_combo:
@@ -115,8 +115,8 @@ def recommend_angles_for_category(
             "REVERSE_CAVEAT_FIRST",
             "SPEC_TRAP_AND_HIDDEN_COST",
         ]
-    # 1. Power, hubs, cables, chargers, vacuum sealers, precision scales -> Spec traps & hidden cost shine!
-    if any(k in cid for k in ("charger", "gan", "hub", "cable", "vacuum", "scale", "power")):
+    # 1. Vacuums, purifiers, dehumidifiers, ultrasonic, dusters, hair dryers, flossers -> Spec traps (Pa/HEPA/kHz) & filter cost shine!
+    if any(k in cid for k in ("vacuum", "purifier", "dehumidifier", "ultrasonic", "duster", "hair_dryer", "flosser")):
         return [
             "SPEC_TRAP_AND_HIDDEN_COST",
             "REVERSE_CAVEAT_FIRST",
@@ -124,8 +124,8 @@ def recommend_angles_for_category(
             "ANTI_DUST_DRAWER_TEST",
             "HYPE_VS_REALITY_TEST",
         ]
-    # 2. Viral desk/kitchen aesthetic gear -> "Thực chiến hay làm màu?" & Habit diagnosis shine!
-    if any(k in cid for k in ("light", "arm", "sprayer", "soap", "dispenser")):
+    # 2. Viral home/bathroom hygiene gadgets -> "Thực chiến hay làm màu?" & Habit diagnosis shine!
+    if any(k in cid for k in ("mop", "trash", "soap", "dispenser", "window", "wiper", "sensor", "closet_light", "mosquito")):
         return [
             "HYPE_VS_REALITY_TEST",
             "HABIT_DIAGNOSIS_STORY",
@@ -133,8 +133,8 @@ def recommend_angles_for_category(
             "FAST_25S_MICRO_LOOP",
             "SPEC_TRAP_AND_HIDDEN_COST",
         ]
-    # 3. Handheld prep & cleaning tools -> "Bài test vứt xó / vệ sinh 10 giây" shines!
-    if any(k in cid for k in ("frother", "grinder", "thermometer", "duster", "timer", "chopper")):
+    # 3. Scrubbers, spot cleaners, lint removers, shoe/clothes dryers, travel kettles -> "Bài test vứt xó / vệ sinh gọn" shines!
+    if any(k in cid for k in ("scrubber", "spot", "carpet", "lint", "shoe_dryer", "clothes_dryer", "kettle")):
         return [
             "ANTI_DUST_DRAWER_TEST",
             "FAST_25S_MICRO_LOOP",
@@ -142,8 +142,8 @@ def recommend_angles_for_category(
             "SPEC_TRAP_AND_HIDDEN_COST",
             "HYPE_VS_REALITY_TEST",
         ]
-    # 4. Ergonomic daily-driver gear & temperature kettles -> Habit diagnosis & Reverse caveat shine!
-    if any(k in cid for k in ("mouse", "stand", "keyboard", "kettle")) or domain == "TECH_DESK":
+    # 4. Daily garment & bedroom comfort appliances -> Habit diagnosis & Reverse caveat shine!
+    if any(k in cid for k in ("steamer", "circulator", "fan", "humidifier", "diffuser")) or domain == "MINI_APPLIANCE":
         return [
             "HABIT_DIAGNOSIS_STORY",
             "REVERSE_CAVEAT_FIRST",
@@ -340,7 +340,7 @@ Mỗi kịch bản trong `scripts` BẮT BUỘC phải điền đúng `domain`, 
 2. `HYPE_VS_REALITY_TEST` (**Thực Chiến Hay Chỉ Làm Màu?**): Mở màn Beat 1 đặt thẳng câu hỏi hoài nghi của đám đông (*"Món ... này thực sự hiệu quả hay chỉ mua về decor làm màu tốn tiền?"*) + so với hàng chợ làm màu -> Beat 2 & 3 giải mã bằng cơ chế vật lý/quang học/thiết kế cốt lõi -> Beat 4 nêu thẳng 1 điểm trừ thực tế -> Beat 5 chấm mức độ thực dụng & mức giá.
 3. `SPEC_TRAP_AND_HIDDEN_COST` (**Thợ Soi Thông Số Ảo & Cái Giá Ngầm**): Mở màn Beat 1 vạch trần chiêu nổ thông số ảo hoặc cái giá ngầm khi ham hàng trôi nổi giá rẻ (dựa đúng dữ liệu `rejected_foils` của M1, không bịa chuyện vô lý) -> Beat 2 & 3 đối chứng thông số chuẩn xác và độ hoàn thiện của hàng chính hãng -> Beat 4 nêu rõ giới hạn thực tế -> Beat 5 chốt bài toán đáng tiền.
 4. `ANTI_DUST_DRAWER_TEST` (**Bài Kiểm Tra Vứt Xó & Độ Lười Đời Thường**): Mở màn Beat 1 chạm trúng tâm lý *"mua về 3 bữa vứt xó đóng bụi vì lích kích/lười vệ sinh"* (như mấy mẫu rẻ khó dùng) -> Beat 2 & 3 chứng minh thao tác gọn lẹ, dễ lau rửa/sử dụng hàng ngày của sản phẩm chính -> Beat 4 nói thẳng điểm trừ thật -> Beat 5 chốt đối tượng dùng mỗi ngày.
-5. `HABIT_DIAGNOSIS_STORY` (**Bắt Bệnh Thói Quen Đời Thường**): Mở màn Beat 1 đọc vị trúng phóc triệu chứng quen thuộc (4h chiều mỏi cổ tay, 11h đêm nhức mắt, căn bếp vướng víu...) -> Beat 2 & 3 dẫn mượt sang cơ chế giải quyết triệt để của sản phẩm chính so với đồ rẻ -> Beat 4 lưu ý thẳng nhược điểm thực tế -> Beat 5 chốt giá & nơi xem hàng chuẩn hãng.
+5. `HABIT_DIAGNOSIS_STORY` (**Bắt Bệnh Thói Quen Đời Thường**): Mở màn Beat 1 đọc vị trúng phóc triệu chứng quen thuộc (sáng vội đi làm áo sơ mi nhăn nhúm, nằm nệm hay hắt hơi ngứa lưng, cọ nhà tắm cúi đau lưng, nằm điều hòa khô họng...) -> Beat 2 & 3 dẫn mượt sang cơ chế giải quyết triệt để của sản phẩm chính so với đồ rẻ -> Beat 4 lưu ý thẳng nhược điểm thực tế -> Beat 5 chốt giá & nơi xem hàng chuẩn hãng.
 6. `FAST_25S_MICRO_LOOP` (**Siêu Tốc 24–27 Giây Kéo Loop & Tương Tác**): Tổng độ dài **85 – 108 từ (mỗi beat 17 – 22 từ)**, nhịp dồn dập gãy gọn không rườm rà: Beat 1 vào thẳng vấn đề + bẫy đồ rẻ; Beat 2 & 3 chốt 2–3 điểm sáng ăn tiền nhất; Beat 4 chốt 1 điểm trừ thật trong 1 câu gọn; Beat 5 báo giá + đặt 1 câu hỏi chia 2 thói quen người dùng để kích thích bình luận + chỉ chỗ xem chính hãng.
 
 NGUYÊN TẮC VÀNG: VĂN NÓI ĐỜI THƯỜNG CỦA NGƯỜI THẬT — CẤM TUYỆT ĐỐI VĂN MẪU AI / BROCHURE:

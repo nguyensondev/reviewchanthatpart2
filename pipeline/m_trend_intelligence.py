@@ -90,275 +90,275 @@ M_TREND_LOCK_PATH = DATA_DIR / ".m_trend.lock"
 
 
 # ==============================================================================
-# 1. CURATED PRODUCT CONCEPT TAXONOMY (24 CONCEPTS: TECH_DESK, KITCHEN_TECH, HOME_LIVING)
+# 1. CURATED PRODUCT CONCEPT TAXONOMY (24 CONCEPTS: CLEANING_CARE & MINI_APPLIANCE)
 # ==============================================================================
 
 PRODUCT_CONCEPT_TAXONOMY: List[Dict[str, Any]] = [
-    # --- TECH_DESK ---
-    {
-        "concept_id": "screen_hanging_light_bar",
-        "domain": "TECH_DESK",
-        "name_vi": "Đèn treo màn hình máy tính chống chói bảo vệ mắt",
-        "sku_anchors": ["den treo man hinh", "den man hinh", "light bar", "iwok"],
-        "triggers": [
-            "moi mat", "chong choi", "lam viec dem", "hoc dem", "den ban", "den man hinh",
-            "anh sang xanh", "can thi", "bao ve mat", "goc lam viec", "setup ban", "man hinh may tinh",
-        ],
-        "exclusions": ["den giao thong", "den duong", "den o to", "den pha xe"],
-    },
-    {
-        "concept_id": "ergonomic_vertical_mouse",
-        "domain": "TECH_DESK",
-        "name_vi": "Chuột công thái học dọc chống mỏi cổ tay",
-        "sku_anchors": ["chuot cong thai hoc", "chuot doc", "vertical mouse", "ergonomic mouse"],
-        "triggers": [
-            "dau co tay", "ong co tay", "hoi chung ong co tay", "moi co tay",
-            "chuot cong thai hoc", "chuot khong day", "lam viec may tinh", "dau vai gay", "ergonomic",
-        ],
-        "exclusions": ["chuot bach", "chuot cong", "diet chuot", "benh chuot"],
-    },
-    {
-        "concept_id": "aluminum_laptop_stand_foldable",
-        "domain": "TECH_DESK",
-        "name_vi": "Giá đỡ laptop hợp kim nhôm tản nhiệt gấp gọn",
-        "sku_anchors": ["gia do laptop", "ke laptop", "de tan nhiet laptop", "laptop stand"],
-        "triggers": [
-            "dau co vai gay", "thoai hoa dot song co", "laptop nong", "tan nhiet laptop",
-            "gia do laptop", "tu the ngoi", "ngoi may tinh lau", "laptop van phong",
-        ],
-        "exclusions": ["gia do dien thoai xe may"],
-    },
-    {
-        "concept_id": "gan_desktop_fast_charger_station",
-        "domain": "TECH_DESK",
-        "name_vi": "Trạm sạc nhanh GaN đa cổng để bàn an toàn",
-        "sku_anchors": ["tram sac", "cu sac gan", "sac nhanh gan", "gan charger"],
-        "triggers": [
-            "sac nhanh", "cu sac", "sac gan", "chay no sac", "an toan sac pin", "sac nhieu thiet bi",
-            "pin dien thoai", "sac laptop", "chay no pin", "no dien thoai khi sac",
-        ],
-        "exclusions": ["tram sac o to dien", "tram sac vinfast", "sac xe dien"],
-    },
-    {
-        "concept_id": "usb_c_multiport_docking_hub",
-        "domain": "TECH_DESK",
-        "name_vi": "Hub chuyển đổi USB-C đa năng xuất hình 4K HDMI",
-        "sku_anchors": ["hub usb", "hub type c", "bo chuyen doi", "docking"],
-        "triggers": [
-            "hub usb", "cong ket noi laptop", "macbook thieu cong", "hdmi 4k", "xuat man hinh roi",
-            "docking station", "bo chia cong type-c",
-        ],
-        "exclusions": ["hub logistics", "trung tam trung chuyen"],
-    },
-    {
-        "concept_id": "low_profile_wireless_mechanical_keyboard",
-        "domain": "TECH_DESK",
-        "name_vi": "Bàn phím cơ không dây Low-Profile gõ êm văn phòng",
-        "sku_anchors": ["ban phim co", "ban phim khong day", "mechanical keyboard"],
-        "triggers": [
-            "ban phim co", "ban phim khong day", "go phim em",
-            "setup goc lam viec", "phu kien may tinh", "ban phim bluetooth", "low profile",
-        ],
-        "exclusions": ["dan piano", "phim dan"],
-    },
-    {
-        "concept_id": "gas_spring_monitor_arm",
-        "domain": "TECH_DESK",
-        "name_vi": "Tay nâng màn hình máy tính trợ lực khí nén",
-        "sku_anchors": ["arm man hinh", "tay nang man hinh", "gia treo man hinh", "monitor arm"],
-        "triggers": [
-            "man hinh roi", "man hinh may tinh", "gia treo man hinh", "arm man hinh",
-            "toi uu ban lam viec", "ban lam viec nho", "hai man hinh",
-        ],
-        "exclusions": ["man hinh tivi", "man hinh led san khau"],
-    },
-    {
-        "concept_id": "magnetic_retractable_fast_charging_cable",
-        "domain": "TECH_DESK",
-        "name_vi": "Cáp sạc nhanh tự cuộn chống rối độ bền cao",
-        "sku_anchors": ["cap sac", "day sac", "charging cable"],
-        "triggers": [
-            "day sac nhanh", "cap sac nhanh", "cap usb-c", "dut cap sac", "sac nhanh 100w", "cap tu cuon",
-        ],
-        "exclusions": ["cap quang bien", "cap dien cao the", "cap treo"],
-    },
-    {
-        "concept_id": "cordless_compressed_air_desk_duster",
-        "domain": "TECH_DESK",
-        "name_vi": "Máy thổi bụi vệ sinh bàn phím và góc máy tính cầm tay",
-        "sku_anchors": ["may thoi bui", "hut bui ban phim", "air duster"],
-        "triggers": [
-            "ve sinh ban phim", "ve sinh laptop", "bui ban phim", "may tinh bui", "quat tan nhiet",
-            "may thoi bui", "ve sinh pc",
-        ],
-        "exclusions": ["bui duong pho", "cong truong"],
-    },
-    {
-        "concept_id": "smart_power_strip_surge_protector",
-        "domain": "TECH_DESK",
-        "name_vi": "Ổ cắm điện chống sét quá tải tích hợp cổng sạc USB-C",
-        "sku_anchors": ["o cam dien", "power strip", "chong set"],
-        "triggers": [
-            "chay no dien", "chap dien", "qua tai dien", "o cam dien", "an toan dien",
-            "phong chay chua chay", "chong set", "chap chay",
-        ],
-        "exclusions": ["nha may dien", "thuy dien", "dien gio"],
-    },
-    # --- KITCHEN_TECH ---
-    {
-        "concept_id": "digital_kitchen_food_scale",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Cân điện tử nhà bếp độ chính xác cao chống nước",
-        "sku_anchors": ["can dien tu", "can nha bep", "can tieu ly", "kitchen scale"],
-        "triggers": [
-            "eat clean", "tinh calo", "lam banh tai nha", "pha ca phe pour over",
-            "can dien tu nha bep", "thuc don giam can", "che do an kieng",
-        ],
-        "exclusions": ["can nang tre em", "can xe tai", "can vang"],
-    },
-    {
-        "concept_id": "instant_read_digital_food_thermometer",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Nhiệt kế nấu ăn điện tử đầu dò inox đo nhanh",
-        "sku_anchors": ["nhiet ke nau an", "nhiet ke thuc pham", "food thermometer"],
-        "triggers": [
-            "nhiet do thit", "nuong thit", "beefsteak", "nhiet do dau",
-            "nhiet ke nau an", "noi chien khong dau",
-        ],
-        "exclusions": ["nhiet ke do sot", "sot xuat huyet", "nhiet do ngoai troi"],
-    },
-    {
-        "concept_id": "compact_vacuum_food_sealer",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy hút chân không thực phẩm mini gia đình",
-        "sku_anchors": ["hut chan khong", "han mieng tui", "vacuum sealer"],
-        "triggers": [
-            "bao quan thuc pham", "tich tru do an", "thuc pham tuoi lau",
-            "hut chan khong thuc pham", "ngo doc thuc pham", "do kho moc", "meal prep", "thit ca dong lanh",
-        ],
-        "exclusions": ["hut ham cau", "hut bun", "tin tac", "lo hong", "kho mau"],
-    },
-    {
-        "concept_id": "glass_mist_oil_sprayer_bottle",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Bình xịt dầu ăn phun sương thủy tinh cho nồi chiên",
-        "sku_anchors": ["binh xit dau", "oil sprayer"],
-        "triggers": [
-            "noi chien khong dau", "giam dau mo", "binh xit dau an", "do chien ran", "nau an it dau",
-        ],
-        "exclusions": ["dau tho", "gia xang dau", "dau nhot", "tieu duong thai ky"],
-    },
-    {
-        "concept_id": "pull_cord_garlic_chopper",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy xay tỏi ớt gia vị mini cầm tay tiện lợi",
-        "sku_anchors": ["xay toi", "bam nho thuc pham", "xay thuc pham mini", "garlic chopper"],
-        "triggers": [
-            "xay toi ot", "so che thuc pham", "nau an nhanh", "do bep thong minh", "an dam cho be",
-            "may xay mini", "sinh vien nau an",
-        ],
-        "exclusions": ["may xay xat lua", "may xay xi mang"],
-    },
-    {
-        "concept_id": "handheld_rechargeable_milk_frother",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy đánh bọt cà phê / matcha cầm tay sạc USB",
-        "sku_anchors": ["danh bot", "tao bot sua", "milk frother"],
-        "triggers": [
-            "ca phe tai nha", "pha matcha", "matcha latte", "ca phe muoi", "danh bot sua",
-            "tra sua tai nha", "tiet kiem tien ca phe",
-        ],
-        "exclusions": ["xuat khau ca phe", "gia ca phe the gioi"],
-    },
-    {
-        "concept_id": "temperature_control_gooseneck_kettle",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Ấm siêu tốc chỉnh nhiệt độ giữ ấm cổ ngỗng",
-        "sku_anchors": ["am sieu toc", "am dun nuoc", "gooseneck kettle"],
-        "triggers": [
-            "pha tra", "pha sua em be", "am sieu toc", "am dun nuoc",
-            "khong khi lanh", "troi ret", "uong nuoc am",
-        ],
-        "exclusions": [],
-    },
-    {
-        "concept_id": "electric_ceramic_burr_coffee_grinder",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy xay cà phê hạt mini lưỡi gốm dùng pin",
-        "sku_anchors": ["xay ca phe", "coffee grinder"],
-        "triggers": [
-            "ca phe hat", "xay ca phe", "ca phe dac san", "ca phe pha phin", "pha espresso",
-            "pha ca phe van phong",
-        ],
-        "exclusions": ["gia ca phe", "san luong ca phe", "khu du lich", "du an"],
-    },
-    {
-        "concept_id": "magnetic_rotary_kitchen_timer",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Đồng hồ bấm giờ nấu ăn & học tập Pomodoro nam châm",
-        "sku_anchors": ["dong ho bam gio", "hen gio nau an", "kitchen timer"],
-        "triggers": [
-            "pomodoro", "tap trung hoc", "quan ly thoi gian", "hen gio nau an", "on thi",
-            "dong ho bam gio",
-        ],
-        "exclusions": ["dong ho thuy si", "dong ho deo tay"],
-    },
-    {
-        "concept_id": "automatic_touchless_dish_soap_dispenser",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy tạo bọt xà phòng rửa tay / rửa bát cảm ứng tự động",
-        "sku_anchors": ["tao bot xa phong", "rua tay cam ung", "soap dispenser"],
-        "triggers": [
-            "rua tay", "cum mua", "tay chan mieng", "ve sinh nha bep",
-            "xa phong tao bot", "phong dich benh",
-        ],
-        "exclusions": [],
-    },
-    # --- HIGH-VELOCITY SEASONAL / WEATHER VIETNAM CONCEPTS (Mapped cleanly to KITCHEN_TECH / TECH_DESK) ---
-    {
-        "concept_id": "mini_clothes_dryer_dehumidifier",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy hút ẩm & máy sấy quần áo mini chống nồm mốc",
-        "sku_anchors": ["may hut am", "may say quan ao", "dehumidifier"],
-        "triggers": [
-            "nom am", "mua keo dai", "quan ao kho kho", "am moc", "do am cao",
-            "mua bao", "mua lon", "ngap lut", "khong khi lanh", "may hut am", "may say quan ao",
-            "mui hoi quan ao", "mua phun", "nha do mo hoi",
-        ],
-        "exclusions": ["say nong san cong nghiep"],
-    },
-    {
-        "concept_id": "cordless_rechargeable_fan_powerbank",
-        "domain": "TECH_DESK",
-        "name_vi": "Quạt tích điện mini & đèn dự phòng khi mất điện nắng nóng",
-        "sku_anchors": ["quat tich dien", "quat mini", "rechargeable fan"],
-        "triggers": [
-            "nang nong", "oi buc", "cat dien", "mat dien", "quat tich dien",
-            "quat mini cam tay", "chong nong",
-        ],
-        "exclusions": ["quat cong nghiep", "dien gio"],
-    },
-    {
-        "concept_id": "hepa_air_purifier_mini",
-        "domain": "TECH_DESK",
-        "name_vi": "Máy lọc không khí mini màng lọc HEPA khử bụi mịn",
-        "sku_anchors": ["may loc khong khi", "mang loc hepa", "air purifier"],
-        "triggers": [
-            "o nhiem khong khi", "bui min", "pm2.5", "aqi", "khoi bui", "viem mui di ung",
-            "may loc khong khi", "suong mu o nhiem", "chat luong khong khi",
-        ],
-        "exclusions": ["loc dau xe"],
-    },
+    # --- CLEANING_CARE (12 Concepts) ---
     {
         "concept_id": "mini_cordless_handheld_vacuum",
-        "domain": "KITCHEN_TECH",
-        "name_vi": "Máy hút bụi cầm tay không dây mini cho sofa, giường & ô tô",
-        "sku_anchors": ["may hut bui", "hut bui cam tay", "handheld vacuum"],
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy hút bụi cầm tay không dây mini cho sofa, khe cửa & ô tô",
+        "sku_anchors": ["may hut bui cam tay", "hut bui mini", "hut bui o to", "handheld vacuum"],
         "triggers": [
-            "hut bui cam tay", "long thu cung", "ve sinh o to", "mat bui giuong",
-            "di ung bui", "robot hut bui", "noi that o to",
+            "hut bui cam tay", "long thu cung", "ve sinh o to", "noi that o to",
+            "bui khe cua", "don nha nhanh", "vun thuc an", "toc rung tren san",
+        ],
+        "exclusions": ["xe hut bui duong pho", "cong trinh"],
+    },
+    {
+        "concept_id": "uv_mattress_dust_mite_vacuum",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy hút bụi giường nệm diệt khuẩn tia UV đập rung tần số cao",
+        "sku_anchors": ["hut bui giuong nem", "hut mat bui", "mattress vacuum", "dust mite"],
+        "triggers": [
+            "mat bui", "di ung bui", "ngua da", "viem da co dia", "viem mui di ung",
+            "hut bui giuong nem", "chan ga goi nem", "long cho meo", "ve sinh nem", "khu khuan nem",
+        ],
+        "exclusions": ["nem cao su gia", "chay nem"],
+    },
+    {
+        "concept_id": "cordless_electric_spin_scrubber",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Chổi cọ nhà tắm và sàn gạch xoay điện không dây chống nước",
+        "sku_anchors": ["choi co nha tam", "choi co dien", "may co rua", "spin scrubber"],
+        "triggers": [
+            "co nha tam", "ve sinh nha tam", "nha ve sinh ban", "o vang gach", "can canxi",
+            "don nha don tet", "tong ve sinh nha cua", "dau lung khi lau don", "choi co dien",
+        ],
+        "exclusions": ["nha ve sinh cong cong", "du an cap thoat nuoc"],
+    },
+    {
+        "concept_id": "spray_flat_mop_microfiber",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Cây lau nhà phun sương bàn phẳng xoay 360 độ gọn nhẹ",
+        "sku_anchors": ["cay lau nha phun suong", "choi lau nha phun suong", "spray mop"],
+        "triggers": [
+            "lau san go", "san go phong rop", "cay lau nha phun suong", "lau nha nhanh kho",
+            "don can ho chung cu", "meo lau nha", "san nha dinh ban",
+        ],
+        "exclusions": ["phun suong lam mat quan bia"],
+    },
+    {
+        "concept_id": "spin_mop_dual_bucket_self_wash",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Bộ cây lau nhà tự vắt thông minh tách nước bẩn và nước sạch",
+        "sku_anchors": ["cay lau nha tu vat", "lau nha tach nuoc", "bo lau nha thong minh", "spin mop"],
+        "triggers": [
+            "lau nha tu vat", "tach nuoc ban", "don nha cuoi tuan", "don dep nha cua",
+            "viem da tay", "khong cham nuoc ban", "cay lau nha thong minh",
         ],
         "exclusions": [],
+    },
+    {
+        "concept_id": "spot_carpet_upholstery_cleaner",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy giặt thảm, ghế sofa vải và nệm cầm tay phun hút làm sạch sâu",
+        "sku_anchors": ["may giat tham", "may giat sofa", "spot cleaner", "carpet cleaner"],
+        "triggers": [
+            "giat sofa", "giat tham", "sofa ni ban", "nem bi moc", "thu cung te bay",
+            "do ca phe ra ghe", "ve sinh sofa tai nha", "may giat sofa cam tay",
+        ],
+        "exclusions": ["dich vu giat tham cong nghiep"],
+    },
+    {
+        "concept_id": "smart_touchless_trash_can",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Thùng rác thông minh cảm ứng tự mở nắp khử mùi chống nước",
+        "sku_anchors": ["thung rac thong minh", "thung rac cam ung", "smart trash"],
+        "triggers": [
+            "mui hoi rac", "ruoi muoi nha bep", "thung rac cam ung", "thung rac thong minh",
+            "giu nha sach", "khu mui nha tam", "phan loai rac sinh hoat",
+        ],
+        "exclusions": ["bai rac", "nha may xu ly rac", "xe cho rac"],
+    },
+    {
+        "concept_id": "automatic_touchless_foam_soap_dispenser",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy tạo bọt xà phòng rửa tay và nước rửa chén cảm ứng tự động",
+        "sku_anchors": ["tao bot xa phong", "rua tay cam ung", "soap dispenser"],
+        "triggers": [
+            "rua tay phong dich", "cum mua", "tay chan mieng", "au khuan duong ruot",
+            "ve sinh tay", "xa phong tao bot", "may rua tay cam ung", "dau mat do",
+        ],
+        "exclusions": [],
+    },
+    {
+        "concept_id": "rechargeable_fabric_lint_remover",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy cắt lông xù quần áo và áo len sạc pin lưỡi thép an toàn",
+        "sku_anchors": ["may cat long xu", "tia long xu", "lint remover", "fabric shaver"],
+        "triggers": [
+            "ao len xu long", "khong khi lanh", "do mua dong", "ao khoac da", "ao ni xu",
+            "may cat long xu", "cham soc quan ao", "phuc hoi ao cu",
+        ],
+        "exclusions": ["xuat khau det may"],
+    },
+    {
+        "concept_id": "ultrasonic_jewelry_glasses_cleaner",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy rửa kính mắt, trang sức và dây đồng hồ bằng sóng siêu âm 45kHz",
+        "sku_anchors": ["may rua kinh", "rua sieu am", "ultrasonic cleaner", "eraclean"],
+        "triggers": [
+            "ve sinh kinh mat", "kinh can mo", "ban le kinh ban", "rua trang suc",
+            "day dong ho hoi", "khay nieng rang trong suot", "may rua sieu am",
+        ],
+        "exclusions": ["sieu am thai", "sieu am bung", "benh vien"],
+    },
+    {
+        "concept_id": "cordless_window_glass_vacuum_wiper",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy lau kính hút nước bẩn cầm tay chống đọng vệt cho cửa sổ & vách tắm",
+        "sku_anchors": ["may lau kinh", "gat kinh hut nuoc", "window vacuum", "glassvac"],
+        "triggers": [
+            "vach kinh nha tam", "kinh o mo", "lau cua kinh chung cu", "mua tat ban kinh",
+            "may lau kinh cam tay", "ve sinh guong nha tam",
+        ],
+        "exclusions": ["lau kinh nha cao tang du day"],
+    },
+    {
+        "concept_id": "cordless_turbo_jet_air_duster",
+        "domain": "CLEANING_CARE",
+        "name_vi": "Máy thổi bụi phản lực cầm tay vệ sinh khe cửa sổ, lồng quạt & góc hẹp",
+        "sku_anchors": ["may thoi bui", "quat phan luc", "air duster", "jet fan"],
+        "triggers": [
+            "ve sinh quat", "luoi loc dieu hoa", "bui khe cua lua", "may thoi bui cam tay",
+            "quat phan luc mini", "ve sinh goc khuat",
+        ],
+        "exclusions": ["dong co phan luc may bay", "chien dau co"],
+    },
+    # --- MINI_APPLIANCE (12 Concepts) ---
+    {
+        "concept_id": "handheld_foldable_garment_steamer",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Bàn ủi hơi nước cầm tay gấp gọn làm nóng nhanh không cần cầu là",
+        "sku_anchors": ["ban ui hoi nuoc", "ban la hoi nuoc cam tay", "garment steamer"],
+        "triggers": [
+            "ban ui hoi nuoc", "ban la cam tay", "ui quan ao nhanh", "ao so mi nhan",
+            "di cong tac", "du lich gon nhe", "trang phuc cong so", "khu mui quan ao",
+        ],
+        "exclusions": ["lo hoi cong nghiep"],
+    },
+    {
+        "concept_id": "mini_room_closet_dehumidifier",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy hút ẩm mini phòng ngủ và tủ quần áo chống nồm ẩm nấm mốc",
+        "sku_anchors": ["may hut am mini", "may hut am", "hut am tu quan ao", "dehumidifier"],
+        "triggers": [
+            "nom am", "troi nom", "nha do mo hoi", "do am cao", "mua phun keo dai",
+            "am moc tu quan ao", "mui hoi am", "nam moc phong ngu", "may hut am",
+        ],
+        "exclusions": ["kho nong san"],
+    },
+    {
+        "concept_id": "hepa_desktop_bedroom_air_purifier",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy lọc không khí mini phòng ngủ màng lọc HEPA H13 khử mùi & bụi mịn",
+        "sku_anchors": ["may loc khong khi", "mang loc hepa", "air purifier"],
+        "triggers": [
+            "o nhiem khong khi", "bui min", "pm2.5", "aqi cao", "suong mu o nhiem",
+            "chat luong khong khi xau", "khoi bui do thi", "mui thu cung", "may loc khong khi",
+        ],
+        "exclusions": ["loc dau dong co", "nha may loc dau"],
+    },
+    {
+        "concept_id": "electric_shoe_dryer_deodorizer",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy sấy khô và khử mùi giày dép bằng nhiệt ấm & tia UV mùa mưa",
+        "sku_anchors": ["may say giay", "say kho giay", "khu mui giay", "shoe dryer"],
+        "triggers": [
+            "mua ngap", "loi nuoc mua", "giay uot mua", "hoi chan", "nam chan",
+            "giay the thao hoi", "may say giay", "mua dam", "trieu cuong ngap",
+        ],
+        "exclusions": ["xuat khau da giay", "nha may giay"],
+    },
+    {
+        "concept_id": "portable_mini_clothes_dryer",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy sấy quần áo mini gấp gọn khử khuẩn cho căn hộ nhỏ & đồ em bé",
+        "sku_anchors": ["may say quan ao mini", "tu say quan ao", "say quan ao gap gon"],
+        "triggers": [
+            "quan ao lau kho", "mua keo dai", "quan ao hoi moc", "mua bao", "thieu nang",
+            "say do em be", "phong tro nho", "may say quan ao mini",
+        ],
+        "exclusions": ["say lua", "say hai san"],
+    },
+    {
+        "concept_id": "quiet_air_circulator_desk_fan",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Quạt đối lưu tuần hoàn không khí / quạt tích điện mini chạy êm",
+        "sku_anchors": ["quat tuan hoan", "quat doi luu", "quat tich dien", "air circulator"],
+        "triggers": [
+            "nang nong gay gat", "oi buc", "cat dien luon phien", "mat dien mua he",
+            "tiet kiem dien dieu hoa", "hoa don tien dien tang", "quat tich dien", "quat doi luu",
+        ],
+        "exclusions": ["dien gio ngoai khoi", "quat cong nghiep chuong trai"],
+    },
+    {
+        "concept_id": "ultrasonic_cool_mist_humidifier_diffuser",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy tạo độ ẩm & khuếch tán tinh dầu siêu âm chống khô họng phòng máy lạnh",
+        "sku_anchors": ["may tao am", "may phun suong tao am", "may xong tinh dau", "humidifier"],
+        "triggers": [
+            "kho da mua hanh kho", "nam dieu hoa kho hong", "nghet mui ban dem",
+            "thoi tiet hanh kho", "do am thap", "nut ne da", "may tao am phong ngu",
+        ],
+        "exclusions": [],
+    },
+    {
+        "concept_id": "uv_electric_mosquito_trap_swatter",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Đèn bắt muỗi tia UV & vợt muỗi điện thông minh tự bẫy muỗi ban đêm",
+        "sku_anchors": ["den bat muoi", "vot muoi", "may bat muoi", "mosquito trap"],
+        "triggers": [
+            "sot xuat huyet", "muoi van", "dich sot xuat huyet", "muoi dot tre em",
+            "den bat muoi", "vot bat muoi", "mua mua nhieu muoi", "phong chong muoi",
+        ],
+        "exclusions": ["phun thuoc diet muoi dien rong"],
+    },
+    {
+        "concept_id": "mini_portable_travel_electric_kettle",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Bình đun nước siêu tốc mini giữ nhiệt cá nhân ruột Inox 316 an toàn",
+        "sku_anchors": ["binh dun nuoc mini", "am sieu toc du lich", "coc dun nuoc", "portable kettle"],
+        "triggers": [
+            "am dun nuoc khach san ban", "du lich gia dinh", "pha sua cho be khi di xa",
+            "uong nuoc am mua lanh", "binh dun nuoc mini", "giu am nuoc ca nhan",
+        ],
+        "exclusions": [],
+    },
+    {
+        "concept_id": "high_speed_ionic_compact_hair_dryer",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy sấy tóc ion âm tốc độ cao nhỏ gọn nhanh khô không xơ rối",
+        "sku_anchors": ["may say toc ion", "may say toc toc do cao", "hair dryer", "laifen"],
+        "triggers": [
+            "toc kho xo", "rung toc", "say toc nhanh kho", "goi dau dem lanh",
+            "may say toc ion am", "cham soc toc tai nha",
+        ],
+        "exclusions": ["salon toc tuyen dung"],
+    },
+    {
+        "concept_id": "motion_sensor_rechargeable_closet_light",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Đèn LED cảm biến chuyển động sạc pin hít nam châm cho tủ áo & hành lang",
+        "sku_anchors": ["den cam bien chuyen dong", "den dan tu quan ao", "den ngu cam bien", "closet light"],
+        "triggers": [
+            "den ngu cam bien", "di ve sinh ban dem", "an toan nguoi gia ban dem",
+            "den tu quan ao", "den cau thang tu sang", "tiet kiem dien chieu sang",
+        ],
+        "exclusions": ["den giao thong", "camera phat nguoi"],
+    },
+    {
+        "concept_id": "cordless_portable_oral_water_flosser",
+        "domain": "MINI_APPLIANCE",
+        "name_vi": "Máy tăm nước cầm tay chống nước IPX7 vệ sinh kẽ răng & niềng răng",
+        "sku_anchors": ["may tam nuoc", "tam nuoc cam tay", "water flosser", "oral irrigator"],
+        "triggers": [
+            "nieng rang", "viem loi", "sau ke rang", "hoi mieng", "cao rang",
+            "cham soc rang mieng", "may tam nuoc", "ve sinh rang nieng",
+        ],
+        "exclusions": ["nha khoa tham my bang gia"],
     },
 ]
 
@@ -1031,7 +1031,7 @@ class StandaloneMTrendEngine:
             verify=verify_arg,
             follow_redirects=True,
             headers={
-                "User-Agent": "ReviewChanThat-TrendIntelligence/1.1 (+Compliance-First RSS/GDELT Reader)"
+                "User-Agent": "GiaDungMini-TrendIntelligence/1.1 (+Compliance-First RSS/GDELT Reader)"
             },
         )
 
@@ -1171,7 +1171,7 @@ class StandaloneMTrendEngine:
                 status="BLOCKED_COMPLIANCE",
                 note="Missing feed_url",
             )
-        query = '(Vietnam OR "Việt Nam") (weather OR rain OR heatwave OR gadget OR kitchen OR tech OR "air quality" OR power OR laptop)'
+        query = '(Vietnam OR "Việt Nam") (weather OR rain OR humidity OR mold OR dengue OR mosquito OR heatwave OR "air quality" OR appliance OR cleaning OR vacuum)'
         params = {
             "query": query,
             "mode": "ArtList",
@@ -1314,10 +1314,10 @@ class StandaloneMTrendEngine:
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         queries = [
-            "review phụ kiện bàn làm việc góc làm việc",
-            "review đồ nhà bếp thông minh tiện ích",
-            "review sạc nhanh GaN đèn màn hình chuột công thái học",
-            "máy hút ẩm máy lọc không khí máy hút chân không review",
+            "review máy hút bụi cầm tay cây lau nhà thông minh",
+            "review đồ vệ sinh nhà cửa chổi cọ điện máy giặt thảm",
+            "review bàn ủi hơi nước cầm tay máy cắt lông xù máy sấy giày",
+            "review máy hút ẩm mini máy lọc không khí quạt tích điện gia dụng mini",
         ]
 
         headers: Dict[str, str] = {}
@@ -1683,7 +1683,7 @@ class StandaloneMTrendEngine:
             "Nhiệm vụ: Đánh giá danh sách Product Concept được Stage A bắt từ tin tức/RSS/GDELT Việt Nam.\n"
             "QUY TẮC NGHIÊM NGẶT:\n"
             "1. KHÔNG suy diễn bừa: Nếu tiêu đề tin tức chỉ trùng từ khóa tình cờ (VD: tin thời sự/chính trị/giải trí không tạo ra nhu cầu mua sản phẩm), PHẢI đặt `is_genuine_buying_need = false` và `relevance_score_100 <= 30`.\n"
-            "2. CHỈ đặt `is_genuine_buying_need = true` khi tin tức/vấn đề đời sống thực sự kích thích nhu cầu tìm mua nhóm sản phẩm đó tại Việt Nam (VD: mưa nồm kéo dài -> máy hút ẩm/sấy quần áo; cảnh báo cháy nổ sạc -> trạm sạc GaN/ổ cắm chống quá tải; ô nhiễm bụi mịn -> máy lọc không khí HEPA; dân văn phòng mỏi mắt/cổ tay -> đèn màn hình/chuột dọc).\n"
+            "2. CHỈ đặt `is_genuine_buying_need = true` khi tin tức/vấn đề đời sống thực sự kích thích nhu cầu tìm mua nhóm sản phẩm Đồ Vệ Sinh Nhà Cửa hoặc Gia Dụng Mini tại Việt Nam (VD: mưa nồm ẩm kéo dài -> máy hút ẩm mini/máy sấy quần áo/máy sấy giày; dịch sốt xuất huyết/mùa mưa -> đèn bắt muỗi/vợt muỗi thông minh; ô nhiễm bụi mịn PM2.5 -> máy lọc không khí HEPA; dị ứng mạt bụi/lông thú -> máy hút bụi giường nệm tia UV; mùa dọn nhà/Tết -> chổi cọ điện/cây lau nhà thông minh/máy giặt thảm sofa).\n"
             "3. Toàn bộ trường tiếng Việt (`trend_title_vi`, `need_pain_point_vi`, `why_matched_vi`, `trend_hook_angle_vi`) BẮT BUỘC viết bằng TIẾNG VIỆT CÓ DẤU UTF-8 CHUẨN 100%.\n"
             "4. `why_matched_vi` viết gọn theo cấu trúc: 'Trend X -> nhu cầu Y -> nhóm sản phẩm Z vì công dụng A'."
         )
@@ -1904,7 +1904,19 @@ class StandaloneMTrendEngine:
             else:
                 # Pure-Python fallback when `--no-llm` is used
                 relevance_100 = min(85.0, round(55.0 + cand["tfidf_total"] * 4.5, 1))
-                horizon = "FLASH_EVENT" if cid in ("mini_clothes_dryer_dehumidifier", "cordless_rechargeable_fan_powerbank", "hepa_air_purifier_mini") else "SEASONAL_SHIFT"
+                horizon = (
+                    "FLASH_EVENT"
+                    if cid
+                    in (
+                        "mini_room_closet_dehumidifier",
+                        "portable_mini_clothes_dryer",
+                        "electric_shoe_dryer_deodorizer",
+                        "quiet_air_circulator_desk_fan",
+                        "hepa_desktop_bedroom_air_purifier",
+                        "uv_electric_mosquito_trap_swatter",
+                    )
+                    else "SEASONAL_SHIFT"
+                )
                 trend_title_vi = ranked_ev[0]["event"].get("title", concept["name_vi"])[:95]
                 pain_point_vi = f"Tín hiệu quan tâm tăng từ {len(indep_pubs)} nguồn về {concept['name_vi'].lower()}."
                 why_matched_vi = (

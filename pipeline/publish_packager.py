@@ -64,97 +64,103 @@ DEFAULT_PUBLISH_MARKDOWN_PATH = PUBLISH_PACK_DIR / "BANG_DANG_BAI_HANG_NGAY.md"
 DEFAULT_M4_OUTPUT_PATH = DATA_DIR / "m4_production_output.json"
 
 CATEGORY_SHORT_KEYWORDS_VI: Dict[str, Tuple[str, List[str]]] = {
-    "screen_hanging_light_bar": (
-        "Đèn Treo Màn Hình Chống Chói",
-        ["#DenTreoManHinh", "#SetupBanLamViec", "#GocLamViec"],
-    ),
-    "ergonomic_vertical_mouse": (
-        "Chuột Công Thái Học Chống Mỏi Cổ Tay",
-        ["#ChuotCongThaiHoc", "#SetupBanLamViec", "#GocLamViec"],
-    ),
-    "digital_kitchen_food_scale": (
-        "Cân Điện Tử Nhà Bếp Chính Xác Cao",
-        ["#CanDienTuNhaBep", "#DoGiaDungThongMinh", "#GocNhaBep"],
-    ),
-    "pull_cord_garlic_chopper": (
-        "Máy Xay Tỏi Ớt Kéo Tay Mini",
-        ["#MayXayToiOt", "#DoGiaDungThongMinh", "#GocNhaBep"],
-    ),
-    "aluminum_laptop_stand_foldable": (
-        "Giá Đỡ Laptop Nhôm Tản Nhiệt",
-        ["#GiaDoLaptop", "#SetupBanLamViec", "#GocLamViec"],
-    ),
-    "gan_desktop_fast_charger_station": (
-        "Trạm Sạc Nhanh Đa Cổng GaN",
-        ["#CuSacGaN", "#PhuKienCongNghe", "#GocLamViec"],
-    ),
-    "usb_c_multiport_docking_hub": (
-        "Hub Chuyển Đổi Type-C Đa Năng",
-        ["#HubTypeC", "#PhuKienMacbook", "#SetupBanLamViec"],
-    ),
-    "instant_read_digital_food_thermometer": (
-        "Nhiệt Kế Nấu Ăn Điện Tử Đo Nhanh",
-        ["#NhietKeNauAn", "#DoBepThongMinh", "#GocNhaBep"],
-    ),
-    "compact_vacuum_food_sealer": (
-        "Máy Hút Chân Không Thực Phẩm Gia Đình",
-        ["#MayHutChanKhong", "#BaoQuanThucPham", "#GocNhaBep"],
-    ),
-    "glass_mist_oil_sprayer_bottle": (
-        "Bình Xịt Dầu Ăn Phun Sương Nồi Chiên",
-        ["#BinhXitDauAn", "#NoiChienKhongDau", "#GocNhaBep"],
-    ),
-    "low_profile_wireless_mechanical_keyboard": (
-        "Bàn Phím Cơ Không Dây Gõ Êm",
-        ["#BanPhimCo", "#SetupBanLamViec", "#GocLamViec"],
-    ),
-    "gas_spring_monitor_arm": (
-        "Arm Treo Màn Hình Trợ Lực Khí Nén",
-        ["#ArmManHinh", "#SetupBanLamViec", "#GocLamViec"],
-    ),
-    "magnetic_retractable_fast_charging_cable": (
-        "Cáp Sạc Nhanh Tự Cuộn Chống Rối",
-        ["#CapSacNhanh", "#PhuKienCongNghe", "#GocLamViec"],
-    ),
-    "cordless_compressed_air_desk_duster": (
-        "Máy Hút Thổi Bụi Bàn Phím Cầm Tay",
-        ["#MayHutBuiMini", "#VeSinhBanPhim", "#GocLamViec"],
-    ),
-    "handheld_rechargeable_milk_frother": (
-        "Máy Đánh Bọt Cà Phê Cầm Tay",
-        ["#MayDanhBotCafe", "#PhaCaPheTaiNha", "#GocNhaBep"],
-    ),
-    "temperature_control_gooseneck_kettle": (
-        "Ấm Siêu Tốc Chỉnh Nhiệt Độ Giữ Ấm",
-        ["#AmSieuToc", "#DoGiaDungThongMinh", "#GocNhaBep"],
-    ),
-    "electric_ceramic_burr_coffee_grinder": (
-        "Máy Xay Cà Phê Hạt Mini Dùng Pin",
-        ["#MayXayCaPhe", "#PhaCaPheTaiNha", "#GocNhaBep"],
-    ),
-    "magnetic_rotary_kitchen_timer": (
-        "Đồng Hồ Bấm Giờ Nấu Ăn Nam Châm",
-        ["#DongHoBamGio", "#MeoNhaBep", "#GocNhaBep"],
-    ),
-    "automatic_touchless_dish_soap_dispenser": (
-        "Máy Tạo Bọt Xà Phòng Cảm Ứng Tự Động",
-        ["#MayTaoBotXaPhong", "#DoGiaDungThongMinh", "#GocNhaBep"],
-    ),
-    "mini_clothes_dryer_dehumidifier": (
-        "Máy Hút Ẩm & Sấy Quần Áo Mini Chống Nồm",
-        ["#MayHutAmMini", "#DoGiaDungThongMinh", "#ChongNomAm"],
-    ),
-    "cordless_rechargeable_fan_powerbank": (
-        "Quạt Tích Điện Mini Pin Trâu",
-        ["#QuatTichDien", "#PhuKienCongNghe", "#SetupBanLamViec"],
-    ),
-    "hepa_air_purifier_mini": (
-        "Máy Lọc Không Khí Mini Màng Lọc HEPA",
-        ["#MayLocKhongKhi", "#DoGiaDungThongMinh", "#GocLamViec"],
-    ),
+    # --- CLEANING_CARE (12 Categories) ---
     "mini_cordless_handheld_vacuum": (
         "Máy Hút Bụi Cầm Tay Không Dây Mini",
-        ["#MayHutBuiMini", "#DoGiaDungThongMinh", "#VeSinhNhaCua"],
+        ["#MayHutBuiMini", "#VeSinhNhaCua", "#MeoDonNha"],
+    ),
+    "uv_mattress_dust_mite_vacuum": (
+        "Máy Hút Bụi Giường Nệm Diệt Khuẩn UV",
+        ["#MayHutBuiGiuongNem", "#VeSinhChanNem", "#NhaSachTienNghi"],
+    ),
+    "cordless_electric_spin_scrubber": (
+        "Chổi Cọ Nhà Tắm Xoay Điện Không Dây",
+        ["#ChoiCoNhaTam", "#VeSinhNhaTam", "#MeoDonNha"],
+    ),
+    "spray_flat_mop_microfiber": (
+        "Cây Lau Nhà Phun Sương Xoay 360 Độ",
+        ["#CayLauNhaPhunSuong", "#MeoDonNha", "#VeSinhNhaCua"],
+    ),
+    "spin_mop_dual_bucket_self_wash": (
+        "Bộ Cây Lau Nhà Tự Vắt Tách Nước Bẩn",
+        ["#CayLauNhaTuVat", "#MeoDonNha", "#VeSinhNhaCua"],
+    ),
+    "spot_carpet_upholstery_cleaner": (
+        "Máy Giặt Thảm & Sofa Cầm Tay Phun Hút",
+        ["#MayGiatSofa", "#VeSinhSofa", "#NhaSachTienNghi"],
+    ),
+    "smart_touchless_trash_can": (
+        "Thùng Rác Thông Minh Cảm Ứng Khử Mùi",
+        ["#ThungRacThongMinh", "#GiaDungThongMinh", "#NhaSachTienNghi"],
+    ),
+    "automatic_touchless_foam_soap_dispenser": (
+        "Máy Tạo Bọt Xà Phòng Cảm Ứng Tự Động",
+        ["#MayTaoBotXaPhong", "#GiaDungMini", "#NhaSachTienNghi"],
+    ),
+    "rechargeable_fabric_lint_remover": (
+        "Máy Cắt Lông Xù Quần Áo Sạc Pin",
+        ["#MayCatLongXu", "#ChamSocQuanAo", "#GiaDungMini"],
+    ),
+    "ultrasonic_jewelry_glasses_cleaner": (
+        "Máy Rửa Kính Mắt & Trang Sức Sóng Siêu Âm",
+        ["#MayRuaSieuAm", "#VeSinhKinhMat", "#GiaDungMini"],
+    ),
+    "cordless_window_glass_vacuum_wiper": (
+        "Máy Lau Kính Hút Nước Cầm Tay Không Vệt",
+        ["#MayLauKinh", "#VeSinhNhaTam", "#MeoDonNha"],
+    ),
+    "cordless_turbo_jet_air_duster": (
+        "Máy Thổi Bụi Phản Lực Cầm Tay Không Dây",
+        ["#MayThoiBuiMini", "#VeSinhNhaCua", "#MeoDonNha"],
+    ),
+    # --- MINI_APPLIANCE (12 Categories) ---
+    "handheld_foldable_garment_steamer": (
+        "Bàn Ủi Hơi Nước Cầm Tay Gấp Gọn",
+        ["#BanUiHoiNuoc", "#GiaDungMini", "#ChamSocQuanAo"],
+    ),
+    "mini_room_closet_dehumidifier": (
+        "Máy Hút Ẩm Mini Phòng Ngủ Chống Nồm",
+        ["#MayHutAmMini", "#ChongNomAm", "#GiaDungMini"],
+    ),
+    "hepa_desktop_bedroom_air_purifier": (
+        "Máy Lọc Không Khí Mini Màng Lọc HEPA",
+        ["#MayLocKhongKhi", "#LocBuiMin", "#GiaDungMini"],
+    ),
+    "electric_shoe_dryer_deodorizer": (
+        "Máy Sấy Khô & Khử Mùi Giày Dép Mùa Mưa",
+        ["#MaySayGiay", "#KhuMuiGiay", "#GiaDungMini"],
+    ),
+    "portable_mini_clothes_dryer": (
+        "Máy Sấy Quần Áo Mini Gấp Gọn Khử Khuẩn",
+        ["#MaySayQuanAoMini", "#ChongNomAm", "#GiaDungMini"],
+    ),
+    "quiet_air_circulator_desk_fan": (
+        "Quạt Tuần Hoàn Không Khí & Tích Điện Mini",
+        ["#QuatTuanHoan", "#QuatTichDien", "#GiaDungMini"],
+    ),
+    "ultrasonic_cool_mist_humidifier_diffuser": (
+        "Máy Tạo Độ Ẩm Phun Sương Phòng Điều Hòa",
+        ["#MayTaoAm", "#PhongNguTienNghi", "#GiaDungMini"],
+    ),
+    "uv_electric_mosquito_trap_swatter": (
+        "Đèn Bắt Muỗi & Vợt Muỗi Điện Thông Minh",
+        ["#DenBatMuoi", "#PhongChongMuoi", "#GiaDungMini"],
+    ),
+    "mini_portable_travel_electric_kettle": (
+        "Bình Đun Nước Siêu Tốc Mini Giữ Nhiệt",
+        ["#BinhDunNuocMini", "#GiaDungMini", "#DoDungTienIch"],
+    ),
+    "high_speed_ionic_compact_hair_dryer": (
+        "Máy Sấy Tóc Ion Âm Tốc Độ Cao Nhỏ Gọn",
+        ["#MaySayTocIon", "#ChamSocToc", "#GiaDungMini"],
+    ),
+    "motion_sensor_rechargeable_closet_light": (
+        "Đèn LED Cảm Biến Chuyển Động Sạc Pin",
+        ["#DenCamBien", "#NhaThongMinh", "#GiaDungMini"],
+    ),
+    "cordless_portable_oral_water_flosser": (
+        "Máy Tăm Nước Cầm Tay Chống Nước IPX7",
+        ["#MayTamNuoc", "#ChamSocRangMieng", "#GiaDungMini"],
     ),
 }
 
@@ -509,22 +515,22 @@ class PublishPackager:
         if entry.script_format == "COMBO_WORKFLOW_SYNERGY" and len(resolved_skus) >= 2:
             s1, s2 = resolved_skus[0], resolved_skus[1]
             b1 = f"{s1.brand} {s1.model_code.replace('_', ' ')}".replace("-Series", "").strip()
-            b2 = f"{s2.brand} {s2.model_code.replace('_', ' ')}".replace("Vertical", "").strip()
-            if entry.domain == "TECH_DESK":
-                base_title = f"Setup Góc Làm Việc Đêm Đỡ Mỏi Mắt & Cổ Tay: {b1} + {b2}"
+            b2 = f"{s2.brand} {s2.model_code.replace('_', ' ')}".replace("-Series", "").strip()
+            if entry.domain == "CLEANING_CARE":
+                base_title = f"Combo Dọn Nhà Sạch Nhanh Đỡ Mỏi Lưng: {b1} + {b2}"
             else:
-                base_title = f"Combo Gian Bếp Gọn Nhanh Chuẩn Xác: {b1} + {b2}"
+                base_title = f"Combo Gia Dụng Mini Gọn Nhẹ Cho Phòng Ở: {b1} + {b2}"
         elif resolved_skus:
             s1 = resolved_skus[0]
             price_str = format_vnd_short(s1.estimated_price_vnd)
             clean_mc = s1.model_code.replace("_", " ").strip()
             bm = f"{s1.brand} {clean_mc}".strip()
-            if entry.category_id == "digital_kitchen_food_scale":
-                base_title = f"{bm} (~{price_str}): Cân Điện Tử Nhà Bếp Có Bền Không?"
-            elif entry.category_id == "screen_hanging_light_bar":
-                base_title = f"{bm} (~{price_str}): Đèn Treo Màn Hình Chống Chói Đáng Mua?"
-            elif entry.category_id == "ergonomic_vertical_mouse":
-                base_title = f"{bm} (~{price_str}): Chuột Công Thái Học Đỡ Mỏi Cổ Tay?"
+            if entry.category_id == "uv_mattress_dust_mite_vacuum":
+                base_title = f"{bm} (~{price_str}): Máy Hút Bụi Giường Nệm UV Có Hiệu Quả?"
+            elif entry.category_id == "handheld_foldable_garment_steamer":
+                base_title = f"{bm} (~{price_str}): Bàn Ủi Hơi Nước Cầm Tay Có Đáng Mua?"
+            elif entry.category_id == "cordless_electric_spin_scrubber":
+                base_title = f"{bm} (~{price_str}): Chổi Cọ Nhà Tắm Điện Có Khỏe Không?"
             elif cat_short_vi:
                 base_title = f"{bm} (~{price_str}): {cat_short_vi} Có Đáng Mua?"
             else:
@@ -533,7 +539,7 @@ class PublishPackager:
                 for token_rm in (s1.brand, clean_mc, s1.model_code):
                     if token_rm:
                         prod_head = re.sub(re.escape(token_rm), "", prod_head, flags=re.IGNORECASE)
-                prod_head = " ".join(prod_head.split()[:5]).strip(" -–,:") or "Sản Phẩm Chính Hãng"
+                prod_head = " ".join(prod_head.split()[:5]).strip(" -–,:") or "Gia Dụng Chính Hãng"
                 base_title = f"{bm} (~{price_str}): {prod_head} Có Đáng Mua?"
         else:
             base_title = entry.title_vi.replace("_", " ").strip()
@@ -562,16 +568,16 @@ class PublishPackager:
         """
         Enforce the `3 + 2 + 1 = 6` Focused Hashtag Formula:
           - 3 Category/Niche search hashtags
-          - 2 Brand/Model hashtags
-          - 1 Channel Authority hashtag (`#ReviewChanThuc`)
+          - 1-2 Brand/Model hashtags
+          - Channel Authority + AI Review hashtags (`#ReviewGiaDungMini`, `#AIReview`)
         """
         cat_info = CATEGORY_SHORT_KEYWORDS_VI.get(entry.category_id)
         if cat_info:
             niche_tags = list(cat_info[1])
-        elif entry.domain == "TECH_DESK":
-            niche_tags = ["#SetupBanLamViec", "#GocLamViec", "#PhuKienCongNghe"]
+        elif entry.domain == "CLEANING_CARE":
+            niche_tags = ["#VeSinhNhaCua", "#MeoDonNha", "#NhaSachTienNghi"]
         else:
-            niche_tags = ["#DoGiaDungThongMinh", "#GocNhaBep", "#MeoNhaBep"]
+            niche_tags = ["#GiaDungMini", "#DoGiaDungThongMinh", "#PhongNguTienNghi"]
 
         brand_model_tags: List[str] = []
         for s_item in resolved_skus:
@@ -583,7 +589,7 @@ class PublishPackager:
                 brand_model_tags.append(f"#{b_clean}{m_clean}")
         brand_model_tags = list(dict.fromkeys(brand_model_tags))[:2]
 
-        combined = list(dict.fromkeys(niche_tags[:3] + brand_model_tags[:1] + ["#ReviewChanThuc", "#AIReview"]))
+        combined = list(dict.fromkeys(niche_tags[:3] + brand_model_tags[:1] + ["#ReviewGiaDungMini", "#AIReview"]))
         return combined[:6]
 
     def _build_chapter_timestamps(
@@ -674,10 +680,10 @@ class PublishPackager:
                 raw_tags.append(prod_short)
                 raw_tags.append(_strip_accents(prod_short))
 
-        if entry.domain == "TECH_DESK":
-            raw_tags.extend(["setup bàn làm việc", "goc lam viec", "phụ kiện bàn làm việc", "ai review"])
+        if entry.domain == "CLEANING_CARE":
+            raw_tags.extend(["đồ vệ sinh nhà cửa", "ve sinh nha cua", "mẹo dọn nhà", "ai review"])
         else:
-            raw_tags.extend(["đồ gia dụng nhà bếp", "do bep thong minh", "review đồ gia dụng", "ai review"])
+            raw_tags.extend(["gia dụng mini", "gia dung thong minh", "review đồ gia dụng", "ai review"])
 
         return sanitize_youtube_tags(raw_tags, max_weighted_bytes=350, max_count=15)
 
@@ -829,12 +835,26 @@ class PublishPackager:
                     f"   • Link dự phòng toàn bộ gian hàng Shopee Mall ({s_item.brand}): {s_item.mall_search_affiliate_link}"
                 )
 
-        # 1. Pinned Comment (Facebook Reels keeps exact status quo; YouTube Shorts adds Bio Hub click guide WITHOUT '<' or '>')
+        # 1. Pinned Comment (Facebook Reels keeps exact status quo; YouTube Shorts adds dynamic Bio Hub click guide WITHOUT '<' or '>')
         varied_intro = HumanBehaviorGuard.pick_varied_pinned_comment_intro(entry.script_id)
         pinned_comment = f"{varied_intro}\n" + "\n".join(pinned_lines)
+        cf_bio_mgr = CloudflareShortLinkManager()
+        cf_reg_info = cf_bio_mgr._load_registry()
+        bio_base = (
+            cf_bio_mgr.custom_base_url
+            or str(cf_reg_info.get("base_url") or "").strip().rstrip("/")
+            or f"{cf_bio_mgr.worker_name}.{cf_bio_mgr.desired_subdomain}.workers.dev"
+        )
+        bio_host_display = re.sub(r"^https?://", "", bio_base).strip("/")
+        creds_raw = safe_load_json(PROJECT_ROOT / "config" / "platform_credentials.json", lambda: {})
+        yt_cfg = creds_raw.get("youtube") if isinstance(creds_raw, dict) else {}
+        yt_handle = str((yt_cfg or {}).get("channel_handle") or "").strip()
+        if yt_handle and not yt_handle.startswith("@"):
+            yt_handle = f"@{yt_handle}"
+        channel_ref_vi = f"tên kênh {yt_handle}" if yt_handle else "ảnh đại diện kênh"
         yt_bio_guide = (
-            "💡 Do YouTube Shorts khóa bấm link trực tiếp ở bình luận, bạn bấm vào tên kênh @shibagamerc "
-            "→ ấn link Bio đầu trang Kênh go.gocreviewchanthuc.workers.dev (hoặc copy nhanh link bên dưới) để mở thẳng Shopee Mall nhé:"
+            f"💡 Do YouTube Shorts khóa bấm link trực tiếp ở bình luận, bạn bấm vào {channel_ref_vi} "
+            f"→ ấn link Bio đầu trang Kênh {bio_host_display} (hoặc copy nhanh link bên dưới) để mở thẳng Shopee Mall nhé:"
         )
         yt_pinned_comment = sanitize_youtube_metadata_text(
             f"{varied_intro}\n{yt_bio_guide}\n" + "\n".join(pinned_lines),
@@ -882,7 +902,7 @@ class PublishPackager:
             re.sub(r"\bshopee(?:\s+mall)?\b", "chính hãng", c, flags=re.IGNORECASE)
             for c in caveat_bullets[:1]
         ]
-        tk_hashtags = list(dict.fromkeys(hashtags + ["#ReviewCongNghe" if entry.domain == "TECH_DESK" else "#ReviewGiaDung"]))[:6]
+        tk_hashtags = list(dict.fromkeys(hashtags + ["#MeoDonNha" if entry.domain == "CLEANING_CARE" else "#GiaDungMini"]))[:6]
         tk_hashtag_line = " ".join(tk_hashtags)
         tiktok_caption_seo = (
             f"{fb_title}\n\n"
@@ -992,7 +1012,7 @@ class PublishPackager:
             "---",
             "",
             "## 🛡️ Cơ chế Bảo Chứng Link Affiliate 3 Lớp (`affiliate_id = 17337280644`) & Chuẩn SEO M5",
-            "1. **Lớp 1 (`SHOPEE_CSV` / `MANUAL_JSON`) & Lớp 2 (`TIER_1_OFFICIAL_MALL_ITEM`):** Chỉ gắn link sản phẩm lẻ khi thuộc **Sổ Trắng Gian Hàng Chính Hãng (`data/shopee_mall_shop_whitelist.json`)** (Logitech Official Shop `52679373`, Baseus Official Mall `1118576800`, Tanita Authorized `61265821`, Lock&Lock Official `55771655`...).",
+            "1. **Lớp 1 (`SHOPEE_CSV` / `MANUAL_JSON`) & Lớp 2 (`TIER_1_OFFICIAL_MALL_ITEM`):** Chỉ gắn link sản phẩm lẻ khi thuộc **Sổ Trắng Gian Hàng Chính Hãng (`data/shopee_mall_shop_whitelist.json`)** (Deerma, Xiaomi, Philips, Dreame, Lock&Lock, Inochi, Levoit, Bear...).",
             "2. **Lớp 3 (`TIER_2_SHOPEE_MALL_SEARCH`):** Luôn đính kèm **Link Affiliate Dự phòng dẫn thẳng vào trang Shopee Mall của đúng mã `Brand + Model`** (không bao giờ hết hàng).",
             "3. **Chuẩn SEO 2 Nền Tảng (`M5`):**",
             "   - **YouTube Shorts:** Tiêu đề 2 đầu từ khóa (`Công năng + Giá/Câu hỏi + Brand Model #Shorts`) + Mô tả 4 khối có `Timestamps 0:00` thực tế + `12-15` thẻ Tags ẩn (có dấu & không dấu).",

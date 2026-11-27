@@ -120,7 +120,7 @@ class HeadToHeadVerdict(BaseModel):
 
 class QualifiedCategoryResult(BaseModel):
     category_id: str
-    domain: DomainId = Field(default="KITCHEN_TECH", description="Chủ đề gốc (TECH_DESK hoặc KITCHEN_TECH)")
+    domain: DomainId = Field(default="CLEANING_CARE", description="Chủ đề gốc (CLEANING_CARE hoặc MINI_APPLIANCE)")
     category_name_vi: str
     problem_solved_vi: str
     observed_market_price_range_vnd: MarketPriceRangeVND

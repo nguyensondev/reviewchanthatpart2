@@ -16,7 +16,7 @@ Responsibilities (User Requirements #1 & #3):
        permanently excluded from M0, M1.5, and M2.
   3. Strict Anti-"Râu Ông Nọ Cắm Cằm Bà Kia" Combo Evaluation:
      - Hard Rule 1: 2 to 4 SKUs max per combo (`2 <= count <= 4`).
-     - Hard Rule 2: All SKUs in a combo MUST share the same `domain` (`TECH_DESK` or `KITCHEN_TECH`)
+     - Hard Rule 2: All SKUs in a combo MUST share the same `domain` (`CLEANING_CARE` or `MINI_APPLIANCE`)
        and the same `micro_scene_id` enum.
      - Hard Rule 3: All SKUs in a combo MUST belong to DISTINCT `category_id`s (never two products of
        the same functional type).
@@ -184,7 +184,7 @@ class M15ComboCuratorEngine:
             "có thực sự phối hợp tự nhiên trong CÙNG MỘT TÌNH HUỐNG SỬ DỤNG THỰC TẾ hay không.\n"
             "2. TUYỆT ĐỐI CẤM 'lấy râu ông nọ cắm cằm bà kia': Nếu các món đồ rời rạc, không liên quan thao tác hoặc ghép vào làm kịch bản khiên cưỡng, "
             "BẮT BUỘC trả về `should_create_combo = false` và nêu rõ `bypass_reason_vi`.\n"
-            "3. Nếu các món thực sự bổ trợ hoàn hảo trong 1 quy trình/không gian (ví dụ: Đèn treo màn hình Baseus i-wok2 chống mỏi mắt + Chuột công thái học dọc Logitech Lift chống mỏi cổ tay cho dân văn phòng ngồi máy tính đêm), "
+            "3. Nếu các món thực sự bổ trợ hoàn hảo trong 1 quy trình/không gian (ví dụ: Bàn ủi hơi nước cầm tay Philips chống nhăn + Máy cắt lông xù quần áo Xiaomi chăm sóc đồ mặc đi làm; hoặc Chổi cọ điện xoay HOTO vệ sinh nhà tắm + Máy tạo bọt xà phòng cảm ứng tự động), "
             "hãy trả về `should_create_combo = true`, chọn từ 2 đến tối đa 4 SKU (`selected_members`), viết kịch bản tình huống phối hợp cụ thể (`joint_workflow_scenario_vi`), "
             "và đặt `hook_title_short_vi` NGẮN GỌN TỐI ĐA 30 KÝ TỰ (có dấu tiếng Việt chuẩn)."
         )
@@ -263,7 +263,7 @@ Hãy đánh giá khách quan và xuất JSON theo schema `LLMComboEvaluationResp
 
         combo_slug = "_".join(m.sku_key for m in combo_members[:3])
         short_hook = enforce_short_hook_title(
-            eval_resp.hook_title_short_vi or "COMBO GÓC LÀM VIỆC ĐỠ MỎI", max_chars=30
+            eval_resp.hook_title_short_vi or "COMBO DỌN NHÀ NHÀN TÊNH", max_chars=30
         )
 
         curated_group = CuratedComboGroup(

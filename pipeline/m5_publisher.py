@@ -432,7 +432,7 @@ class M5PublisherEngine:
         notes = [f"Chưa đạt kiểm định `{k}`" for k, ok in checks.items() if not ok]
 
         self.payloads_dir.mkdir(parents=True, exist_ok=True)
-        yt_category_id = "28" if pkg.domain == "TECH_DESK" else "26"
+        yt_category_id = "26" if pkg.domain == "CLEANING_CARE" else "28"
         sampled_comment_delay = HumanBehaviorGuard.sample_post_upload_comment_delay_sec()
 
         yt_payload = {
@@ -525,7 +525,7 @@ class M5PublisherEngine:
             access_token = tok_resp.json()["access_token"]
             headers = {"Authorization": f"Bearer {access_token}"}
 
-            yt_cat = "28" if pkg.domain == "TECH_DESK" else "26"
+            yt_cat = "26" if pkg.domain == "CLEANING_CARE" else "28"
             safe_title = sanitize_youtube_metadata_text(pkg.youtube_shorts_title_vi, max_chars=95)
             safe_desc = sanitize_youtube_metadata_text(pkg.youtube_shorts_description_vi, max_chars=4800)
             safe_tags = sanitize_youtube_tags(pkg.youtube_video_tags, max_weighted_bytes=350, max_count=15)

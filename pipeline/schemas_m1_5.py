@@ -27,10 +27,10 @@ from pipeline.schemas_m0 import (
 )
 
 MicroSceneId = Literal[
-    "DESK_ERGONOMIC_WORKFLOW",    # Chuột/phím công thái học + đèn màn hình + giá đỡ laptop + kê tay
-    "DESK_POWER_CONNECTIVITY",    # Sạc GaN để bàn + Hub USB-C + cáp từ tính + ổ cắm thông minh
-    "KITCHEN_PRECISION_PREP",     # Cân điện tử + nhiệt kế nấu ăn + máy đánh bọt/pha chế + dụng cụ định lượng
-    "KITCHEN_COOKING_STORAGE",    # Máy hút chân không + hộp bảo quản + bình xịt dầu + dụng cụ sơ chế nấu nướng
+    "FLOOR_BED_DEEP_CLEANING",    # Máy hút bụi cầm tay + máy hút bụi giường nệm UV + cây lau nhà tự vắt/phun sương + máy giặt thảm sofa
+    "BATHROOM_SURFACE_HYGIENE",   # Chổi cọ điện xoay nhà tắm + máy tạo bọt xà phòng cảm ứng + thùng rác cảm ứng + lau kính/siêu âm
+    "GARMENT_SHOE_FABRIC_CARE",   # Bàn ủi hơi nước cầm tay + máy cắt lông xù quần áo + máy sấy giày/quần áo khử khuẩn
+    "AIR_CLIMATE_COMFORT_MINI",   # Máy hút ẩm mini + máy lọc không khí HEPA mini + quạt tích điện/tuần hoàn + tạo ẩm/bắt muỗi/đèn cảm biến
 ]
 
 SKULifecycleStatus = Literal[
@@ -218,8 +218,8 @@ class LLMComboEvaluationResponse(BaseModel):
         default="",
         description="Nếu should_create_combo=False, giải thích rõ vì sao các SKU hiện có không nên ghép combo",
     )
-    domain: DomainId = "TECH_DESK"
-    micro_scene_id: MicroSceneId = "DESK_ERGONOMIC_WORKFLOW"
+    domain: DomainId = "CLEANING_CARE"
+    micro_scene_id: MicroSceneId = "FLOOR_BED_DEEP_CLEANING"
     combo_title_vi: str = ""
     hook_title_short_vi: str = Field(
         default="",

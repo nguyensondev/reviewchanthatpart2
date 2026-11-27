@@ -66,12 +66,23 @@ _KNOWN_ASCII_TECH_BRAND_TOKENS: set[str] = {
     "touch", "sensor", "timer", "mode", "app", "full", "hd", "uhd", "fps", "hz", "cri", "ra", "format",
     # Common English product/model nouns embedded inside Vietnamese product titles & specs
     "mi", "yeelight", "lumias", "levoit", "sharp", "jisulife", "philips", "midea", "simplus",
+    "dreame", "roborock", "tineco", "dyson", "karcher", "bissell", "jimmy", "uwant", "eufy",
+    "ecovacs", "shark", "bosch", "scotch", "brite", "vileda", "townew", "ninestars", "eko",
+    "hoto", "eraclean", "sothing", "simpleway", "laifen", "iris", "ohyama", "woozoo",
+    "electrolux", "hitachi", "toshiba", "comet", "fujihome", "fujie", "kosmen", "tiross",
+    "zojirushi", "tiger", "halio", "showsee", "flyco", "acerpure", "enpuly", "kitimop", "parroti",
     "computer", "monitor", "light", "bar", "screen", "desk", "desktop", "laptop", "stand",
     "wireless", "ergonomic", "vertical", "mouse", "keyboard", "mechanical", "low", "profile",
     "switch", "silent", "custom", "qmk", "via", "charger", "station", "power", "adapter",
     "cable", "magnetic", "retractable", "hub", "dock", "docking", "arm", "mount", "vesa",
     "purifier", "hepa", "filter", "compact", "dehumidifier", "humidifier", "dryer", "fan",
-    "portable", "rechargeable", "vacuum", "sealer", "cleaner", "duster", "blower",
+    "portable", "rechargeable", "vacuum", "sealer", "cleaner", "duster", "blower", "cordless",
+    "mop", "spray", "flat", "spin", "scrubber", "brush", "mattress", "mite", "uv", "uvc",
+    "spot", "carpet", "upholstery", "trash", "bin", "lint", "remover", "shaver", "fabric",
+    "steamer", "garment", "iron", "foldable", "shoe", "circulator", "diffuser", "aroma",
+    "ultrasonic", "wiper", "window", "glass", "glassvac", "mosquito", "trap", "swatter",
+    "flosser", "oral", "sonicare", "ionic", "hair", "gleam", "glory", "swift", "motion",
+    "ipx7", "ipx5", "ipx4", "pa", "kpa", "psi", "khz", "rpm", "cadrr", "cadr",
     "scale", "kitchen", "digital", "thermometer", "probe", "kettle", "gooseneck",
     "grinder", "burr", "frother", "milk", "sprayer", "oil", "mist", "bottle", "dispenser",
     "soap", "foam", "touchless", "chopper", "garlic", "series", "lite", "gen", "edition",
@@ -257,9 +268,12 @@ def normalize_vietnamese_for_tts(text: str) -> str:
     s = re.sub(r"\bCRI\s*(?:Ra\s*)?(\d+)\b", r"chỉ số hoàn màu \1", s, flags=re.IGNORECASE)
     s = re.sub(r"\bRa\s*(\d+)\b", r"chỉ số hoàn màu \1", s, flags=re.IGNORECASE)
 
-    # IP water/dust ratings & PM2.5
+    # IP water/dust ratings, UV-C, PSI & PM2.5
     s = re.sub(r"\bIPX(\d)\b", r"I P X \1", s, flags=re.IGNORECASE)
     s = re.sub(r"\bIP(\d{2})\b", r"I P \1", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bUV[-\s]*C\b", "U V C", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*[-–]\s*(\d+)\s*psi\b", r"\1 đến \2 P S I", s, flags=re.IGNORECASE)
+    s = re.sub(r"\b(\d+)\s*psi\b", r"\1 P S I", s, flags=re.IGNORECASE)
     s = re.sub(r"\bPM\s*2[.,]5\b", "P M 2 phẩy 5", s, flags=re.IGNORECASE)
 
     # Slash-based rate units like vòng/phút, lần/ngày, ml/giờ

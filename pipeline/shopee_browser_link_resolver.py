@@ -106,7 +106,7 @@ def build_shopee_an_redir_link(
     Returns `(canonical_product_url, s_shopee_vn_affiliate_link)`.
     """
     canonical_url = f"https://shopee.vn/product/{shop_id}/{item_id}"
-    clean_sub = re.sub(r"[^a-zA-Z0-9_-]", "", sub_id or "")[:32] or "congnghe"
+    clean_sub = re.sub(r"[^a-zA-Z0-9_-]", "", sub_id or "")[:32] or "giadungmini"
     encoded_origin = urllib.parse.quote(canonical_url, safe="")
     an_redir_url = (
         f"https://s.shopee.vn/an_redir?origin_link={encoded_origin}"

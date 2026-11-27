@@ -36,38 +36,41 @@ FORBIDDEN_NON_PRODUCT_KEYWORDS: set[str] = {
     "phim", "chien tranh", "hoat hinh", "nhac", "bai hat", "hai huoc", "review phim", "tom tat phim",
 }
 
-# Mandatory product / appliance / tech domain anchor keywords (at least 1 whole word/phrase must appear in dynamic video titles)
+# Mandatory product / appliance / cleaning domain anchor keywords (at least 1 whole word/phrase must appear in dynamic video titles)
 PRODUCT_ANCHOR_KEYWORDS: Tuple[str, ...] = (
-    "light", "lamp", "screen", "monitor", "led", "iwok",
-    "mouse", "ergonomic", "lift", "vertical", "wireless", "bluetooth",
-    "stand", "laptop", "holder", "riser", "foldable", "aluminum",
-    "charger", "gan", "charging", "power", "adapter", "station",
-    "hub", "dock", "docking", "usb", "hdmi", "type c", "multiport",
-    "keyboard", "mechanical", "keychron", "nuphy", "switch", "low profile", "qmk", "keycap",
-    "arm", "mount", "gas spring", "vesa",
-    "cable", "magnetic", "retractable", "cord",
-    "duster", "vacuum", "cleaner", "blower", "compressed air", "suction",
-    "purifier", "hepa", "air", "filter", "dehumidifier", "humidifier", "dryer", "clothes",
-    "fan", "cooling", "portable", "rechargeable",
-    "scale", "weighing", "kitchen", "cooking", "gram", "tanita",
-    "thermometer", "temperature", "probe", "meat", "food",
+    "duster", "vacuum", "cleaner", "cleaning", "blower", "compressed air", "suction", "cordless",
+    "mattress", "mite", "dust mite", "uv", "sterilize", "sanitizing",
+    "scrubber", "spin scrubber", "brush", "bathroom", "tile",
+    "mop", "spray mop", "spin mop", "flat mop", "bucket", "floor", "sweep", "wiper", "window", "glassvac",
+    "spot", "spotclean", "carpet", "upholstery", "sofa", "stain",
+    "trash", "trash can", "bin", "garbage", "sensor", "touchless",
+    "dispenser", "soap", "foam", "handwash",
+    "lint", "lint remover", "fabric shaver", "shaver", "fuzz",
+    "ultrasonic", "glasses", "jewelry", "watch", "eraclean",
+    "steamer", "garment", "iron", "ironing", "steam", "foldable",
+    "purifier", "hepa", "air", "filter", "dehumidifier", "humidifier", "diffuser", "aroma", "mist",
+    "dryer", "clothes", "shoe", "deodorizer", "hair dryer", "ionic", "high speed",
+    "fan", "circulator", "cooling", "portable", "rechargeable",
+    "mosquito", "swatter", "trap", "bug", "insect",
+    "kettle", "boiling", "thermos", "cup",
+    "light", "lamp", "led", "night light", "closet", "motion",
+    "flosser", "water flosser", "irrigator", "oral", "sonicare",
     "sealer", "vacuum sealer", "packaging", "preservation",
-    "sprayer", "oil", "mist", "bottle", "dispenser", "soap", "foam", "touchless",
-    "frother", "milk", "coffee", "matcha", "whisk", "espresso", "grinder", "burr",
-    "kettle", "gooseneck", "boiling", "teapot", "timer", "rotary", "stopwatch",
-    "appliance", "appliances", "gadget", "unboxing", "unbox", "setup", "desk",
-    "den", "man hinh", "chuot", "cong thai hoc", "gia do", "ke laptop",
-    "sac", "tram sac", "cu sac", "bo chia", "ban phim", "tay nang", "gia treo",
-    "cap sac", "may thoi", "may hut", "hut bui", "can dien tu", "can tieu ly",
-    "nhiet ke", "hut chan khong", "han mieng tui", "binh xit", "chai xit",
-    "danh bot", "tao bot", "am sieu toc", "am dun", "may xay", "coi xay",
-    "dong ho", "bam gio", "hen gio", "xa phong", "rua chen", "gia dung", "nha bep",
-    "loc khong khi", "hut am", "say quan ao", "quat", "quat tich dien", "bui min",
+    "appliance", "appliances", "gadget", "home", "unboxing", "unbox",
+    "may hut", "hut bui", "giuong nem", "mat bui", "diet khuan",
+    "choi co", "co nha tam", "co rua", "cay lau", "lau nha", "phun suong", "tu vat",
+    "giat tham", "giat sofa", "thung rac", "cam ung", "tao bot", "xa phong", "rua tay", "rua chen",
+    "cat long xu", "long xu", "sieu am", "rua kinh", "lau kinh", "gat kinh", "may thoi", "phan luc",
+    "ban ui", "ban la", "hoi nuoc", "hut am", "chong nom", "loc khong khi", "bui min",
+    "say giay", "say quan ao", "tu say", "quat", "tuan hoan", "doi luu", "quat tich dien",
+    "tao am", "tinh dau", "bat muoi", "vot muoi", "den bat muoi",
+    "binh dun", "am sieu toc", "am dun", "say toc", "ion am", "den cam bien", "tam nuoc",
+    "gia dung", "ve sinh", "nha cua", "nha tam", "phong ngu", "hut chan khong",
 )
 
-# Short brand names that collide with common words / movie / gaming channels on YouTube
+# Short brand names that collide with common words / movie / wildlife / gaming channels on YouTube
 AMBIGUOUS_SHORT_BRANDS: set[str] = {
-    "bear", "mi", "delux", "simplus", "joyoung", "midea",
+    "bear", "mi", "delux", "simplus", "joyoung", "midea", "shark", "tiger", "comet", "eko",
 }
 
 
@@ -219,8 +222,8 @@ class OfficialBrandVideoGate:
         if channel_norm not in allowed_norms:
             return False
 
-        # 5. For ambiguous short brand channels (like "Bear", "Mi"), require explicit official channel suffix or model+anchor match
-        if brand_norm in AMBIGUOUS_SHORT_BRANDS and channel_norm in ("bear", "mi", "delux"):
+        # 5. For ambiguous short brand channels (like "Bear", "Mi", "Shark", "Tiger", "Comet"), require explicit official channel suffix
+        if brand_norm in AMBIGUOUS_SHORT_BRANDS and channel_norm in ("bear", "mi", "delux", "shark", "tiger", "comet", "eko"):
             return False
 
         # 6. Mandatory Product Anchor Keyword Gate: video title MUST contain at least 1 real appliance/tech keyword

@@ -1,6 +1,6 @@
 # Quy Tắc Vận Hành & Tương Thích 2 Máy (Mac M1 Dev <-> MacBook Pro 2015 Production)
 
-Dự án này được phát triển trên **Mac M1 (Dev)** và chạy ngầm tự động 24/7 trên **MacBook Pro Early 2015 (`macOS Big Sur 11.4`, Dual-Core Intel Core i5 `x86_64`, 16GB RAM)** thông qua GitHub Private Repo (`https://github.com/nguyensondev/reviewchanthat`).
+Dự án này (Kênh #2 — **Đồ vệ sinh & Gia dụng mini**) được phát triển trên **Mac M1 (Dev)** và chạy ngầm tự động 24/7 trên **MacBook Pro Early 2015 (`macOS Big Sur 11.4`, Dual-Core Intel Core i5 `x86_64`, 16GB RAM)** thông qua GitHub Private Repo (`https://github.com/nguyensondev/reviewchanthatpart2.git`).
 
 Mọi thay đổi trong dự án BẮT BUỘC phải tuân thủ nghiêm ngặt các quy tắc sau:
 
@@ -17,5 +17,5 @@ Mọi thay đổi trong dự án BẮT BUỘC phải tuân thủ nghiêm ngặt 
 
 ## 3. Kỷ Luật Đồng Bộ Git & Cloudflare Giữa 2 Máy
 - **Tuyệt đối không commit** `.env`, `config/platform_credentials.json`, các file trạng thái runtime (`data/video_registry.json`, `data/sku_registry.json`, `data/daily_quota_state.json`, `data/m5_publish_state.json`, `data/short_links_registry.json`) hoặc thư mục video (`output/`, `data/m4_video_cache/`, `poc/`).
-- **Đồng bộ Cloudflare Worker (`go.gocreviewchanthuc.workers.dev`):** Luôn giữ cơ chế đọc `ROUTES` hiện có trên Cloudflare về gộp (`merge`) trước khi `PUT` trong `pipeline/cloudflare_shortener.py` để máy Dev không bao giờ ghi đè làm mất link rút gọn do máy Mac 2015 tạo ra.
+- **Đồng bộ Cloudflare Worker (`giadung.gocreviewchanthuc.workers.dev`):** Luôn giữ cơ chế đọc `ROUTES` hiện có trên Cloudflare về gộp (`merge`) trước khi `PUT` trong `pipeline/cloudflare_shortener.py` (tách riêng `CLOUDFLARE_WORKER_NAME=giadung` độc lập với `go` của Kênh #1) để máy Dev không bao giờ ghi đè làm mất link rút gọn do máy Mac 2015 tạo ra.
 - **Bảo vệ tài khoản Shopee Affiliate (`17337280644`):** Tuyệt đối không gửi bất kỳ HTTP request tự động nào tới `shopee.vn` hoặc `s.shopee.vn` có gắn `affiliate_id=17337280644` (khi test link rút gọn Cloudflare bắt buộc đặt `follow_redirects=False`).

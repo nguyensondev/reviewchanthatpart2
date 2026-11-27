@@ -106,7 +106,7 @@ class AuditedBeatSegment(BaseModel):
 class AuditedScriptItem(BaseModel):
     script_id: str
     script_format: ScriptFormat
-    domain: DomainId = "KITCHEN_TECH"
+    domain: DomainId = "CLEANING_CARE"
     category_id: str = "general"
     narrative_angle: str = "PAIN_POINT_REALITY_CHECK"
     qaqc_status: QAQCStatus
